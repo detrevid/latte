@@ -1,0 +1,16 @@
+### Haskell
+build/
+dist/
+.cabal-sandbox/
+cabal.sandbox.config
+
+### JetBrains  IDE
+*.iml
+.idea/
+
+### Executables created by Makfile
+latc_llvm
+
+### Files that are made by ./remake_grammar script
+src/Latte/BNFC/
+src/Makefile
