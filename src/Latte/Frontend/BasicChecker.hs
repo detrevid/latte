@@ -9,8 +9,8 @@ import Data.List
 
 doChecks :: Program -> Err ()
 doChecks prog = do
-  checkForMain prog
   checkTypes prog
+  checkForMain prog
 
 checkForMain :: Program -> Err ()
 checkForMain (Program tdefs) =

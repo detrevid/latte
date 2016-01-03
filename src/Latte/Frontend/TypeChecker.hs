@@ -27,33 +27,30 @@ newtype CheckerType a = CheckerType (StateT CheckerState Err a)
 runCheckerType :: CheckerType a -> Err a
 runCheckerType (CheckerType x) = evalStateT x (emptyEnv, topLevelDepth)
 
-putEnv' :: TypeEnv -> CheckerState -> ((), CheckerState)
-putEnv' env (_, depth) =  ((), (env, depth))
+putEnv' :: TypeEnv -> CheckerState -> CheckerState
+putEnv' env (_, depth) =  (env, depth)
 
 putEnv :: TypeEnv -> CheckerType ()
-putEnv env = CheckerType $ state $ putEnv' env
-
-getEnv' :: CheckerState -> (TypeEnv, CheckerState)
-getEnv' chs@(env, _) = (env, chs)
+putEnv env = CheckerType $ modify $ putEnv' env
 
 getEnv :: CheckerType TypeEnv
-getEnv = CheckerType $ state getEnv'
+getEnv = CheckerType $ gets fst
 
-addToEnv' :: String -> TypeInfo -> CheckerState -> ((), CheckerState)
+addToEnv' :: String -> TypeInfo -> CheckerState -> CheckerState
 addToEnv' id t (env, depth) =
-  ((), (env', depth))
+  (env', depth)
  where env' = Map.insert id t env
 
 addToEnv :: String -> TypeInfo -> CheckerType ()
-addToEnv id t = CheckerType $ state $ addToEnv' id t
+addToEnv id t = CheckerType $ modify $ addToEnv' id t
 
-removeFromEnv' :: String -> CheckerState -> ((), CheckerState)
+removeFromEnv' :: String -> CheckerState -> CheckerState
 removeFromEnv' id (env, depth) =
-  ((), (env', depth))
+  (env', depth)
  where env' = Map.delete id env
 
 removeFromEnv :: String ->  CheckerType ()
-removeFromEnv id = CheckerType $ state $ removeFromEnv' id
+removeFromEnv id = CheckerType $ modify $ removeFromEnv' id
 
 lookupTypeEnv' :: Monad m => TypeEnv -> String -> m (Maybe TypeInfo)
 lookupTypeEnv' env id = return $ Map.lookup id env
@@ -63,26 +60,20 @@ lookupTypeEnv id = do
   env <- getEnv
   lookupTypeEnv' env id
 
-getDepth' :: CheckerState -> (Int, CheckerState)
-getDepth' chs@(_, depth) = (depth, chs)
-
 getDepth :: CheckerType Int
-getDepth = CheckerType $ state getDepth'
+getDepth = CheckerType $ gets snd
 
-changeDepth' :: (Int -> Int) -> CheckerState -> ((), CheckerState)
-changeDepth' f (env, depth) = ((), (env, f depth))
+changeDepth' :: (Int -> Int) -> CheckerState -> CheckerState
+changeDepth' f (env, depth) = (env, f depth)
 
 incDepth :: CheckerType ()
-incDepth = CheckerType $ state $ changeDepth' (1+)
+incDepth = CheckerType $ modify $ changeDepth' (1+)
 
 decDepth :: CheckerType ()
-decDepth = CheckerType $ state $ changeDepth' (1-)
-
---class Typeable a where
---  checkTypes :: CheckerType a
+decDepth = CheckerType $ modify $ changeDepth' (1-)
 
 --TODO - use it everywhere
---TODO - maybe add expressionthat has the bad type
+--TODO - maybe add expression that has the bad type
 typeError :: Position -> String -> Type -> Type -> String
 typeError pos errMsg texpected tfound =
   "Type Error\n" ++
@@ -91,21 +82,13 @@ typeError pos errMsg texpected tfound =
   "Type expected: " ++ printTree texpected ++ "\n" ++
   "Type found: " ++ printTree tfound ++ "\n"
 
---checkType :: Position -> String -> Type -> Type -> CheckerType ()
---checkType pos errMsg texpected tfound = do
---  when (tfound  /= texpected) (fail $ typeError pos "Bad return type." texpected tfound)
-
-
 undecError :: Position -> VarId -> String
 undecError pos id =
    show pos ++ "\n" ++ show id ++ " has not been declared\n"
 
 redecError :: Position -> VarId -> Position -> String
-redecError pos id decPos=
+redecError pos id decPos =
    show pos ++ "\n" ++ show id ++ " has been already declared in this block at: " ++ show decPos ++ "\n"
-
---checkTypesProgram :: Program -> CheckerType ()
---checkTypesProgram prog =
 
 checkTypes' :: Program -> CheckerType ()
 checkTypes' prog@(Program topdefs) = do
@@ -182,14 +165,6 @@ checkTypesStmt x exRetType = case x of
         addToEnv id (t, pos, depth)
           ) items
     return typeVoid
---   SAss pid@(PIdent (_, id)) (TAss (pos, _)) expr -> do
---     mt <- lookupTypeEnv id
---     case mt of
---       Nothing      -> fail $ undecError pos id
---       Just (t, _)  -> do
---         texpr <- checkTypesExpr expr
---         when (texpr /= t) (fail $ typeError pos "Bad expression type after assignment sign." t texpr)
---         return typeVoid
   SAss pid@(PIdent (pos, id)) expr -> do
     mt <- lookupTypeEnv id
     case mt of
@@ -279,7 +254,6 @@ checkTypesExpr exp = case exp of
             "non-boolean expression.\n" ++ show exp ++ "\nType found:" ++ show texp
         --TODO wydziel kod tych metod
   EMul expr1 (TMulOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeInt typeInt
-  --EAdd expr1 (TAddOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeInt
   EAdd expr1 addop expr2 -> case addop of
     OPlus (TPlus info) -> do
       texpr1 <- checkTypesExpr expr1
@@ -297,9 +271,6 @@ checkTypesExpr exp = case exp of
                 show texpr2
          return typeBool
       else checkTypesBinOp info expr1 expr2 typeInt typeBool
-  --ERel expr1 relop expr2 -> case relop of
-  --  UnOp (TMinus info) -> checkTypesBinOp info expr1 expr2 typeBool
-  --  UnOp (TExclM info) -> checkTypesBinOp info expr1 expr2 typeBool
   EAnd expr1 (TLogAndOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeBool typeBool
   EOr expr1 (TLogOrOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeBool typeBool
 
