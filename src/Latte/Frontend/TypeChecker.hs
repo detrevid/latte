@@ -17,37 +17,39 @@ import qualified Data.Map as Map
 internalErrMsg :: String
 internalErrMsg = "Internal error during type checking phase"
 
-type CheckerState = TypeEnv
+type CheckerState = (TypeEnv, Int)
+
+topLevelDepth = 0
 
 newtype CheckerType a = CheckerType (StateT CheckerState Err a)
   deriving (Functor, Applicative, Monad)
 
 runCheckerType :: CheckerType a -> Err a
-runCheckerType (CheckerType x) = evalStateT x emptyEnv
+runCheckerType (CheckerType x) = evalStateT x (emptyEnv, topLevelDepth)
 
 putEnv' :: TypeEnv -> CheckerState -> ((), CheckerState)
-putEnv' env _ =  ((), env)
+putEnv' env (_, depth) =  ((), (env, depth))
 
 putEnv :: TypeEnv -> CheckerType ()
 putEnv env = CheckerType $ state $ putEnv' env
 
 getEnv' :: CheckerState -> (TypeEnv, CheckerState)
-getEnv' env = (env, env)
+getEnv' chs@(env, _) = (env, chs)
 
 getEnv :: CheckerType TypeEnv
 getEnv = CheckerType $ state getEnv'
 
 addToEnv' :: String -> TypeInfo -> CheckerState -> ((), CheckerState)
-addToEnv' id t env =
-  ((), env')
+addToEnv' id t (env, depth) =
+  ((), (env', depth))
  where env' = Map.insert id t env
 
 addToEnv :: String -> TypeInfo -> CheckerType ()
 addToEnv id t = CheckerType $ state $ addToEnv' id t
 
 removeFromEnv' :: String -> CheckerState -> ((), CheckerState)
-removeFromEnv' id env =
-  ((), env')
+removeFromEnv' id (env, depth) =
+  ((), (env', depth))
  where env' = Map.delete id env
 
 removeFromEnv :: String ->  CheckerType ()
@@ -60,6 +62,21 @@ lookupTypeEnv :: String -> CheckerType (Maybe TypeInfo)
 lookupTypeEnv id = do
   env <- getEnv
   lookupTypeEnv' env id
+
+getDepth' :: CheckerState -> (Int, CheckerState)
+getDepth' chs@(_, depth) = (depth, chs)
+
+getDepth :: CheckerType Int
+getDepth = CheckerType $ state getDepth'
+
+changeDepth' :: (Int -> Int) -> CheckerState -> ((), CheckerState)
+changeDepth' f (env, depth) = ((), (env, f depth))
+
+incDepth :: CheckerType ()
+incDepth = CheckerType $ state $ changeDepth' (1+)
+
+decDepth :: CheckerType ()
+decDepth = CheckerType $ state $ changeDepth' (1-)
 
 --class Typeable a where
 --  checkTypes :: CheckerType a
@@ -79,9 +96,13 @@ typeError pos errMsg texpected tfound =
 --  when (tfound  /= texpected) (fail $ typeError pos "Bad return type." texpected tfound)
 
 
-undecVarError :: Position -> VarId -> String
-undecVarError pos id =
-   show pos ++ "\nVariable " ++ show id ++ " has not been declared"
+undecError :: Position -> VarId -> String
+undecError pos id =
+   show pos ++ "\n" ++ show id ++ " has not been declared\n"
+
+redecError :: Position -> VarId -> Position -> String
+redecError pos id decPos=
+   show pos ++ "\n" ++ show id ++ " has been already declared in this block at: " ++ show decPos ++ "\n"
 
 --checkTypesProgram :: Program -> CheckerType ()
 --checkTypesProgram prog =
@@ -98,25 +119,46 @@ checkTypes prog =  runCheckerType $ checkTypes' prog
 addTopDefsToEnv :: Program -> CheckerType ()
 addTopDefsToEnv (Program tdefs) =
   mapM_ (\(TDFnDef tret pid@(PIdent (pos, id)) args block) -> do
-    let targs = map (\(Arg t _) -> t) args
-    addToEnv id ((TFun tret targs), pos)) tdefs
+    mt <- lookupTypeEnv id
+    case mt of
+      Nothing         -> do
+        let targs = map (\(Arg t _) -> t) args
+        addToEnv id ((TFun tret targs), pos, topLevelDepth)
+      Just (t, decPos, depthDec)  -> fail $ redecError pos id decPos
+      ) tdefs
 
 checkTypesTopDef :: TopDef -> CheckerType ()
 checkTypesTopDef tdef = case tdef of
   TDFnDef tret pid@(PIdent (pos, id)) args block -> do
     oldEnv <- getEnv
-    mapM_ (\(Arg t (PIdent (pos, id))) -> addToEnv id (t, pos)) args
+    incDepth
+    depth <- getDepth
+    mapM_ (\(Arg t (PIdent (pos, id))) -> addToEnv id (t, pos, depth)) args
     tblock <- checkTypesBlock block tret
     when (tblock /= tret) (fail $ typeError pos ("Function " ++ id ++
       " not always returns expected type.") tret tblock)
+    decDepth
     putEnv oldEnv
 
 checkTypesBlock :: Block -> Type -> CheckerType Type
 checkTypesBlock (Block stmts) exRetType = do
+  incDepth
   tstmts <- mapM ((flip checkTypesStmt) exRetType) stmts
+  decDepth
   if any ((==) exRetType) tstmts
     then return exRetType
     else return typeVoid
+
+checkIfRedeclared :: PIdent -> CheckerType ()
+checkIfRedeclared (PIdent (pos, id)) = do
+  depth <- getDepth
+  mt <- lookupTypeEnv id
+  case mt of
+    Nothing         -> return ()
+    Just (t, decPos, depthDec)  ->
+      if depth == depthDec
+        then fail $ redecError pos id decPos
+        else return ()
 
 checkTypesStmt :: Stmt -> Type -> CheckerType Type
 checkTypesStmt x exRetType = case x of
@@ -127,19 +169,23 @@ checkTypesStmt x exRetType = case x of
     putEnv odlEnv
     return t
   SDecl t items -> do
+    depth <- getDepth
     mapM (\item -> case item of
-      INoInit (PIdent (pos, id))   -> addToEnv id (t, pos)
-      IInit (PIdent (pos, id)) exp -> do
+      INoInit pid@(PIdent (pos, id))   -> do
+        checkIfRedeclared pid
+        addToEnv id (t, pos, depth)
+      IInit pid@(PIdent (pos, id)) exp -> do
+        checkIfRedeclared pid
         texp <- checkTypesExpr exp
         when (texp /= t) $ fail $ typeError pos ("Initialization of variable " ++
           show id ++ ".\n" ++ "Expression: " ++ printTree exp) t texp
-        addToEnv id (t, pos)
+        addToEnv id (t, pos, depth)
           ) items
     return typeVoid
 --   SAss pid@(PIdent (_, id)) (TAss (pos, _)) expr -> do
 --     mt <- lookupTypeEnv id
 --     case mt of
---       Nothing      -> fail $ undecVarError pos id
+--       Nothing      -> fail $ undecError pos id
 --       Just (t, _)  -> do
 --         texpr <- checkTypesExpr expr
 --         when (texpr /= t) (fail $ typeError pos "Bad expression type after assignment sign." t texpr)
@@ -147,16 +193,16 @@ checkTypesStmt x exRetType = case x of
   SAss pid@(PIdent (pos, id)) expr -> do
     mt <- lookupTypeEnv id
     case mt of
-      Nothing      -> fail $ undecVarError pos id
-      Just (t, _)  -> do
+      Nothing      -> fail $ undecError pos id
+      Just (t, _, _)  -> do
         texpr <- checkTypesExpr expr
         when (texpr /= t) (fail $ typeError pos "Bad expression type after assignment sign." t texpr)
         return typeVoid
   SDIncr pid@(PIdent (pos, id)) _ -> do
     mt <- lookupTypeEnv id
     case mt of
-      Nothing      -> fail $ undecVarError pos id
-      Just (t, _)  ->
+      Nothing      -> fail $ undecError pos id
+      Just (t, _, _)  ->
         if t /= typeInt
           then fail $ typeError pos ("Variable " ++ show id) typeInt  t
           else return typeVoid
@@ -194,8 +240,8 @@ checkTypesExpr exp = case exp of
   EVar pid@(PIdent (pos, id)) -> do
     mt <- lookupTypeEnv id
     case mt of
-      Nothing      -> fail $ undecVarError pos id
-      Just (t, _)  -> return t
+      Nothing      -> fail $ undecError pos id
+      Just (t, _, _)  -> return t
   ELit lit -> case lit of
     LInt _    -> return typeInt
     LTrue     -> return typeBool
@@ -203,20 +249,21 @@ checkTypesExpr exp = case exp of
     LString _ -> return typeString
   EApp pid@(PIdent (pos, id)) exps -> do
     mt <- lookupTypeEnv id
+    texps <- mapM (checkTypesExpr) exps
     case mt of
-      Nothing      -> fail $ undecVarError pos id
-      Just (t, decPos)  -> case t of
+      Nothing      -> fail $ undecError pos id
+      Just (t, decPos, _)  -> case t of
         TFun treturn targs -> do
-          texps <- mapM (checkTypesExpr) exps
           when (length targs /= length texps) (fail $ "Type Error\n" ++ show pos ++ "\nFunction " ++ show id ++
             " declared at " ++ show decPos ++ " used with bad number of arguments" ++ "\nNumber expected: " ++
             show (length targs) ++ "\nNumber found: " ++ show (length texps) ++ "\n")
           mapM_ (\(ta, te, i) -> do
-            when (ta /= te) $ fail $ "Type Error\n" ++ show pos ++ "\nFunction " ++ show id ++
-              " declared at " ++ show decPos ++ " argument no. " ++ show i ++ "\nType expected: " ++
-              show ta ++ "\nType found: " ++ show te ++ "\n"
+            when (ta /= te) $ fail $ typeError pos ("Function " ++ show id ++ " declared at " ++ show decPos ++
+              " argument no. " ++ show i) ta te
             return ()) (zip3 targs texps [1..])
           return treturn
+        _ -> fail $ show pos ++ "\n" ++ id ++ " declared at " ++ show decPos ++ "is not a function\n" ++
+               "\nType found: " ++ show t
   EUnOp opr exp -> do
     texp <- checkTypesExpr exp
     case opr of

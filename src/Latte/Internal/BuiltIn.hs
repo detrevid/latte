@@ -9,21 +9,23 @@ import Debug.Trace
 import Control.Monad.State
 import qualified Control.Monad.Trans.State as StateT
 
+binpos = (-1,-1)
+bidepth = 0
 
 printIntName = "printInt"
-printIntInfo = (TFun typeVoid [typeInt], (-1,-1))
+printIntInfo = (TFun typeVoid [typeInt], binpos, bidepth)
 
 printStringName = "printString"
-printStringInfo = (TFun typeVoid [typeString], (-1,-1))
+printStringInfo = (TFun typeVoid [typeString], binpos, bidepth)
 
 errorName = "error"
-errorInfo = (TFun typeVoid [], (-1,-1))
+errorInfo = (TFun typeVoid [], binpos, bidepth)
 
 readIntName = "readInt"
-readIntInfo = (TFun typeInt [], (-1,-1))
+readIntInfo = (TFun typeInt [], binpos, bidepth)
 
 readStringName = "readString"
-readStringInfo = (TFun typeString [], (-1,-1))
+readStringInfo = (TFun typeString [], binpos, bidepth)
 
 builtInsTypes = Map.fromList [(printIntName, printIntInfo),
                               (printStringName, printStringInfo),

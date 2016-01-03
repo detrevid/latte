@@ -26,7 +26,7 @@ typeVoid = TType (TBuiltIn BIVoid)
 type Position = (Int, Int)
 type VarId = String
 
-type TypeInfo = (Type, Position)
+type TypeInfo = (Type, Position, Int)
 
 type TypeEnv = Map.Map String TypeInfo
 emptyEnv :: TypeEnv
