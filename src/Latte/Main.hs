@@ -5,18 +5,22 @@ import Latte.BNFC.ParLatte
 import Latte.BNFC.AbsLatte
 import Latte.BNFC.ErrM
 import Latte.BNFC.PrintLatte
+import Latte.Frontend.BasicChecker
 
 import Control.Monad.State
 import Data.Map as Map
+import System.IO
 
 main :: IO ()
 main = do
-  interact interpret
+  interact compile
   putStrLn ""
 
-interpret :: String -> String
-interpret s =
+compile :: String -> String
+compile s =
   let p = pProgram (myLexer s)
   in case p of
-    Ok prog -> show prog
-    Bad m -> show m
+    Ok prog -> case (doChecks prog) of
+      Ok () -> show prog
+      Bad m -> m
+    Bad m -> m
