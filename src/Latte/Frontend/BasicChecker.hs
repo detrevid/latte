@@ -5,6 +5,8 @@ import Latte.BNFC.AbsLatte
 import Latte.Frontend.TypeChecker
 import Latte.Internal.Type
 
+import Latte.Backend.Compiler
+
 import Data.List
 
 doChecks :: Program -> Err ()

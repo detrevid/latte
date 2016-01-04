@@ -94,7 +94,7 @@ TBuiltIn.   TypeName    ::= BinType ;
 
 --TClass.     TypeName    ::= ClassType ;
 
-TArray.    Type ::= Type "[]" ;
+--TArray.    Type ::= Type "[]" ;
 
 TType.     Type ::= TypeName ;
 
