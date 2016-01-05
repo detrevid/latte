@@ -12,6 +12,7 @@ import Latte.MainH
 
 import Control.Monad.State
 import Data.Map as Map
+import Debug.Trace
 import System.IO
 import System.IO.Unsafe
 import Control.Monad
@@ -27,10 +28,11 @@ compileProg' name prog = do
   doChecks prog
   compileProgram name prog
 
-compileProg :: String -> Program -> IO String
-compileProg name prog = case (compileProg' name prog) of
-  Ok mod -> compileModuleToLLVM $ mod
-  Bad m -> fail m
+compileProg :: String -> Program -> IO (Err String)
+compileProg name prog =
+  case (fmap compileModuleToLLVM (compileProg' name prog)) of
+    Ok io -> fmap Ok io
+    Bad m -> return $ Bad m
 
 compileLLFile :: String -> IO ()
 compileLLFile filePath = do

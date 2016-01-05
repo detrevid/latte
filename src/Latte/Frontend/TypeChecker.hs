@@ -12,6 +12,7 @@ import Control.Applicative (Applicative)
 import Control.Monad
 import Control.Monad.Trans.State
 import qualified Data.Map as Map
+import Data.List
 
 
 internalErrMsg :: String
@@ -74,13 +75,15 @@ decDepth = CheckerType $ modify $ changeDepth' (1-)
 
 --TODO - use it everywhere
 --TODO - maybe add expression that has the bad type
-typeError :: Position -> String -> Type -> Type -> String
-typeError pos errMsg texpected tfound =
+typeError :: Position -> String -> Maybe Expr -> Type -> Type -> String
+typeError pos errMsg mexpr texpected tfound  =
   "Type Error\n" ++
   show pos ++ "\n" ++
   errMsg ++ "\n" ++
+  exprStr ++
   "Type expected: " ++ printTree texpected ++ "\n" ++
   "Type found: " ++ printTree tfound ++ "\n"
+ where exprStr = maybe "" (\exp -> "Expression: " ++ printTree exp ++ "\n") mexpr
 
 undecError :: Position -> VarId -> String
 undecError pos id =
@@ -119,7 +122,7 @@ checkTypesTopDef tdef = case tdef of
     mapM_ (\(Arg t (PIdent (pos, id))) -> addToEnv id (t, pos, depth)) args
     tblock <- checkTypesBlock block tret
     when (tblock /= tret) (fail $ typeError pos ("Function " ++ id ++
-      " not always returns expected type.") tret tblock)
+      " not always returns expected type.") Nothing tret tblock)
     decDepth
     putEnv oldEnv
 
@@ -160,8 +163,7 @@ checkTypesStmt x exRetType = case x of
       IInit pid@(PIdent (pos, id)) exp -> do
         checkIfRedeclared pid
         texp <- checkTypesExpr exp
-        when (texp /= t) $ fail $ typeError pos ("Initialization of variable " ++
-          show id ++ ".\n" ++ "Expression: " ++ printTree exp) t texp
+        when (texp /= t) $ fail $ typeError pos ("Initialization of variable " ++ show id) (Just exp) t texp
         addToEnv id (t, pos, depth)
           ) items
     return typeVoid
@@ -171,7 +173,7 @@ checkTypesStmt x exRetType = case x of
       Nothing      -> fail $ undecError pos id
       Just (t, _, _)  -> do
         texpr <- checkTypesExpr expr
-        when (texpr /= t) (fail $ typeError pos "Bad expression type after assignment sign." t texpr)
+        when (texpr /= t) (fail $ typeError pos "Bad expression type after assignment sign." (Just expr) t texpr)
         return typeVoid
   SDIncr pid@(PIdent (pos, id)) _ -> do
     mt <- lookupTypeEnv id
@@ -179,23 +181,23 @@ checkTypesStmt x exRetType = case x of
       Nothing      -> fail $ undecError pos id
       Just (t, _, _)  ->
         if t /= typeInt
-          then fail $ typeError pos ("Variable " ++ show id) typeInt  t
+          then fail $ typeError pos ("Variable " ++ show id) Nothing typeInt  t
           else return typeVoid
   SRet (TRet (pos, _)) expr -> do
     texpr <- checkTypesExpr expr
-    when (texpr /= exRetType) (fail $ typeError pos "Bad return type." exRetType texpr)
+    when (texpr /= exRetType) (fail $ typeError pos "Bad return type." (Just expr) exRetType texpr)
     return texpr
   SVRet (TRet (pos, _)) -> do
-    when (typeVoid  /= exRetType) (fail $ typeError pos "Bad return type." exRetType typeVoid)
+    when (typeVoid  /= exRetType) (fail $ typeError pos "Bad return type." Nothing exRetType typeVoid)
     return typeVoid
   SCond (TIf (pos, _)) expr stmt -> do
     texpr <- checkTypesExpr expr
-    when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." typeBool texpr)
+    when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." (Just expr) typeBool texpr)
     checkTypesStmt stmt exRetType
     return typeVoid
   SCondElse (TIf (pos, _)) expr stmt1 stmt2 -> do
     texpr <- checkTypesExpr expr
-    when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." typeBool texpr)
+    when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." (Just expr) typeBool texpr)
     tretif <- checkTypesStmt stmt1 exRetType
     tretel <- checkTypesStmt stmt2 exRetType
     if (tretif == typeVoid || tretel == typeVoid)
@@ -203,7 +205,7 @@ checkTypesStmt x exRetType = case x of
       else return exRetType
   SWhile (TWhile (pos, _)) expr stmt -> do
     texpr <- checkTypesExpr expr
-    when (texpr /= typeBool) (fail $ typeError pos "Bad type in while condition." typeBool texpr)
+    when (texpr /= typeBool) (fail $ typeError pos "Bad type in while condition." (Just expr) typeBool texpr)
     checkTypesStmt stmt exRetType
     return typeVoid
   SExp expr -> do
@@ -214,9 +216,7 @@ checkTypesExpr :: Expr -> CheckerType Type
 checkTypesExpr exp = case exp of
   EVar pid@(PIdent (pos, id)) -> do
     mt <- lookupTypeEnv id
-    case mt of
-      Nothing      -> fail $ undecError pos id
-      Just (t, _, _)  -> return t
+    maybe (fail $ undecError pos id) (\(t, _, _)  -> return t) mt
   ELit lit -> case lit of
     LInt _    -> return typeInt
     LTrue     -> return typeBool
@@ -232,26 +232,26 @@ checkTypesExpr exp = case exp of
           when (length targs /= length texps) (fail $ "Type Error\n" ++ show pos ++ "\nFunction " ++ show id ++
             " declared at " ++ show decPos ++ " used with bad number of arguments" ++ "\nNumber expected: " ++
             show (length targs) ++ "\nNumber found: " ++ show (length texps) ++ "\n")
-          mapM_ (\(ta, te, i) -> do
+          mapM_ (\(ta, te, exp, i) -> do
             when (ta /= te) $ fail $ typeError pos ("Function " ++ show id ++ " declared at " ++ show decPos ++
-              " argument no. " ++ show i) ta te
-            return ()) (zip3 targs texps [1..])
+              " argument no. " ++ show i) (Just exp) ta te
+            return ()) (zip4 targs texps exps [1..])
           return treturn
         _ -> fail $ show pos ++ "\n" ++ id ++ " declared at " ++ show decPos ++ "is not a function\n" ++
-               "\nType found: " ++ show t
+               "\nType found: " ++ printTree t
   EUnOp opr exp -> do
     texp <- checkTypesExpr exp
     case opr of
       ONeg (TMinus (pos, opr)) ->
         if texp == typeInt
           then return typeInt
-          else fail $ "Type Error\n" ++ show pos ++ "\nUnary operator " ++ show opr ++ " applied to" ++
-            "non-integer expression.\n" ++ show exp ++ "\nType found:" ++ show texp
+          else fail $ typeError pos ("\nUnary operator " ++ show opr ++ " applied to" ++
+            "non-integer expression.") (Just exp) typeInt  texp
       ONot (TExclM (pos, opr))  ->
         if texp == typeBool
           then return typeBool
-          else fail $ "Type Error\n" ++ show pos ++ "\nUnary operator " ++ show opr ++ " applied to" ++
-            "non-boolean expression.\n" ++ show exp ++ "\nType found:" ++ show texp
+          else fail $ typeError pos ("\nUnary operator " ++ show opr ++ " applied to" ++
+            "non-boolean expression.") (Just exp) typeBool texp
         --TODO wydziel kod tych metod
   EMul expr1 (TMulOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeInt typeInt
   EAdd expr1 addop expr2 -> case addop of
@@ -266,9 +266,8 @@ checkTypesExpr exp = case exp of
       then do
          texpr1 <- checkTypesExpr expr1
          texpr2 <- checkTypesExpr expr2
-         when (texpr1 /= texpr2) $ fail $ "Type Error\n" ++ show pos ++ "\nBinary operator " ++ show opr ++
-                " applied to expression.\n" ++ show expr2 ++ "Type expected: " ++ show texpr1 ++ "\nType found: " ++
-                show texpr2
+         when (texpr1 /= texpr2) $ fail $ typeError pos ("\nBinary operator " ++ show opr ++
+                " applied to expression.") (Just expr2) texpr1 texpr2
          return typeBool
       else checkTypesBinOp info expr1 expr2 typeInt typeBool
   EAnd expr1 (TLogAndOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeBool typeBool
@@ -278,9 +277,9 @@ checkTypesExpr exp = case exp of
 checkTypesBinOp :: ((Int, Int), String) -> Expr -> Expr -> Type -> Type -> CheckerType Type
 checkTypesBinOp (pos, opr) expl expr eType rtype = do
   texpl <- checkTypesExpr expl
-  when (texpl /= eType) $ fail $ "Type Error\n" ++ show pos ++ "\nBinary operator " ++ show opr ++
-     " applied to expression.\n" ++ show expl ++ "\nType expected: " ++ show eType ++ "\nType found: " ++ show texpl
+  when (texpl /= eType) $ fail $ typeError pos ("\nBinary operator " ++ show opr ++
+     " applied to expression.\n") (Just expl) eType texpl
   texpr <- checkTypesExpr expr
-  when (texpr /= eType) $ fail $ "Type Error\n" ++ show pos ++ "\nBinary operator " ++ show opr ++
-       " applied to expression.\n" ++ show expr ++ "Type expected: " ++ show eType ++ "\nType found: " ++ show texpr
+  when (texpr /= eType) $ fail $ typeError pos ("\nBinary operator " ++ show opr ++
+       " applied to an expression.\n") (Just expr) eType texpr
   return rtype
