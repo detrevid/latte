@@ -1,12 +1,13 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module Latte.Frontend.TypeChecker (checkTypes, getGlobalDefsTypesEnv) where
+module Latte.Frontend.TypeChecker (checkTypes, getGlobalDefsTypesEnv, getGlobalCDefsTypesEnv) where
 
 import Latte.BNFC.AbsLatte
 import Latte.BNFC.ErrM
 import Latte.BNFC.PrintLatte
 import Latte.Internal.BuiltIn
 import Latte.Internal.Type
+import Latte.Internal.ASTInternal
 
 import Control.Applicative (Applicative)
 import Control.Monad
@@ -90,14 +91,15 @@ redecError :: Position -> VarId -> Position -> String
 redecError pos id decPos =
    show pos ++ "\n" ++ show id ++ " has been already declared in this block at: " ++ show decPos ++ "\n"
 
-checkTypes' :: Program -> CheckerType ()
+checkTypes' :: Program -> CheckerType CProgram
 checkTypes' prog@(Program topdefs) = do
   putEnv $ addBuiltInsToTypeEnv emptyTypeEnv
   addTopDefsToEnv prog
-  mapM_ checkTypesTopDef topdefs
+  ctopdefs <- mapM checkTypesTopDef topdefs
+  return $ CProgram ctopdefs
 
-checkTypes :: Program -> Err ()
-checkTypes prog =  runCheckerType $ checkTypes' prog
+checkTypes :: Program -> Err CProgram
+checkTypes prog = runCheckerType $ checkTypes' prog
 
 getGlobalDefsTypesEnv' :: Program -> CheckerType TypeEnv
 getGlobalDefsTypesEnv' prog = do
@@ -105,9 +107,22 @@ getGlobalDefsTypesEnv' prog = do
   addTopDefsToEnv prog
   getEnv
 
+getGlobalCDefsTypesEnv' :: CProgram -> CheckerType TypeEnv
+getGlobalCDefsTypesEnv' prog = do
+  putEnv $ addBuiltInsToTypeEnv emptyTypeEnv
+  addTopCDefsToEnv prog
+  getEnv
+
+
 getGlobalDefsTypesEnv :: Program -> TypeEnv
 getGlobalDefsTypesEnv prog =
   case (runCheckerType $ getGlobalDefsTypesEnv' prog) of
+    Ok env -> env
+    Bad m -> emptyTypeEnv
+
+getGlobalCDefsTypesEnv :: CProgram -> TypeEnv
+getGlobalCDefsTypesEnv prog =
+  case (runCheckerType $ getGlobalCDefsTypesEnv' prog) of
     Ok env -> env
     Bad m -> emptyTypeEnv
 
@@ -122,27 +137,41 @@ addTopDefsToEnv (Program tdefs) =
       Just (t, decPos, depthDec)  -> fail $ redecError pos id decPos
       ) tdefs
 
-checkTypesTopDef :: TopDef -> CheckerType ()
+addTopCDefsToEnv :: CProgram -> CheckerType ()
+addTopCDefsToEnv (CProgram tdefs) =
+  mapM_ (\(CTDFnDef tret id args block) -> do
+    mt <- lookupTypeEnv id
+    case mt of
+      Nothing         -> do
+        let targs = map (\(CArg t _) -> t) args
+        addToEnv id ((TFun tret targs), (0, 0), topLevelDepth)
+      Just _ -> fail $ internalErrMsg
+      ) tdefs
+
+checkTypesTopDef :: TopDef -> CheckerType CTopDef
 checkTypesTopDef tdef = case tdef of
   TDFnDef tret pid@(PIdent (pos, id)) args block -> do
     oldEnv <- getEnv
     incDepth
     depth <- getDepth
-    mapM_ (\(Arg t (PIdent (pos, id))) -> addToEnv id (t, pos, depth)) args
-    tblock <- checkTypesBlock block tret
+    cargs <- mapM (\(Arg t (PIdent (pos, id))) -> do
+      addToEnv id (t, pos, depth)
+      return $ CArg t id) args
+    (tblock, cblock) <- checkTypesBlock block tret
     when (tblock /= tret) (fail $ typeError pos ("Function " ++ id ++
       " not always returns expected type.") Nothing tret tblock)
     decDepth
     putEnv oldEnv
+    return $ CTDFnDef tret id cargs cblock
 
-checkTypesBlock :: Block -> Type -> CheckerType Type
+checkTypesBlock :: Block -> Type -> CheckerType (Type, CBlock)
 checkTypesBlock (Block stmts) exRetType = do
   incDepth
-  tstmts <- mapM ((flip checkTypesStmt) exRetType) stmts
+  (tstmts, cstmts) <- fmap unzip $ mapM ((flip checkTypesStmt) exRetType) stmts
   decDepth
   if any ((==) exRetType) tstmts
-    then return exRetType
-    else return typeVoid
+    then return (exRetType, CBlock cstmts)
+    else return (typeVoid, CBlock cstmts)
 
 checkIfRedeclared :: PIdent -> CheckerType ()
 checkIfRedeclared (PIdent (pos, id)) = do
@@ -155,85 +184,90 @@ checkIfRedeclared (PIdent (pos, id)) = do
         then fail $ redecError pos id decPos
         else return ()
 
-checkTypesStmt :: Stmt -> Type -> CheckerType Type
+checkTypesStmt :: Stmt -> Type -> CheckerType (Type, CStmt)
 checkTypesStmt x exRetType = case x of
-  SEmpty -> return typeVoid
+  SEmpty -> return (typeVoid, CSEmpty)
   SBlock block -> do
     odlEnv <- getEnv
-    t <- checkTypesBlock block exRetType
+    (t, cblock) <- checkTypesBlock block exRetType
     putEnv odlEnv
-    return t
+    return (t, CSBlock cblock)
   SDecl t items -> do
     depth <- getDepth
-    mapM (\item -> case item of
+    citems <- mapM (\item -> case item of
       INoInit pid@(PIdent (pos, id))   -> do
         checkIfRedeclared pid
         addToEnv id (t, pos, depth)
+        return $ CINoInit id
       IInit pid@(PIdent (pos, id)) exp -> do
         checkIfRedeclared pid
-        texp <- checkTypesExpr exp
+        (texp, cexp) <- checkTypesExpr exp
         when (texp /= t) $ fail $ typeError pos ("Initialization of variable " ++ show id) (Just exp) t texp
         addToEnv id (t, pos, depth)
+        return $ CIInit id cexp
           ) items
-    return typeVoid
+    return (typeVoid, CSDecl t citems)
   SAss pid@(PIdent (pos, id)) expr -> do
     mt <- lookupTypeEnv id
     case mt of
       Nothing      -> fail $ undecError pos id
       Just (t, _, _)  -> do
-        texpr <- checkTypesExpr expr
+        (texpr, cexpr) <- checkTypesExpr expr
         when (texpr /= t) (fail $ typeError pos "Bad expression type after assignment sign." (Just expr) t texpr)
-        return typeVoid
-  SDIncr pid@(PIdent (pos, id)) _ -> do
+        return (typeVoid, CSAss id cexpr)
+  SDIncr pid@(PIdent (pos, id)) (TDIOp (_, opr)) -> do
     mt <- lookupTypeEnv id
+    let opr' = if opr == "++" then "+" else "-"
     case mt of
       Nothing      -> fail $ undecError pos id
       Just (t, _, _)  ->
         if t /= typeInt
           then fail $ typeError pos ("Variable " ++ show id) Nothing typeInt  t
-          else return typeVoid
+          else return (typeVoid, (CSAss id ((CBinOp ((CEVar id), t) opr' ((CELit (LInt 1)), typeInt)), typeInt)))
   SRet (TRet (pos, _)) expr -> do
-    texpr <- checkTypesExpr expr
+    (texpr, cexpr) <- checkTypesExpr expr
     when (texpr /= exRetType) (fail $ typeError pos "Bad return type." (Just expr) exRetType texpr)
-    return texpr
+    return (texpr, CSRet cexpr)
   SVRet (TRet (pos, _)) -> do
     when (typeVoid  /= exRetType) (fail $ typeError pos "Bad return type." Nothing exRetType typeVoid)
-    return typeVoid
+    return (typeVoid, CSVRet)
   SCond (TIf (pos, _)) expr stmt -> do
-    texpr <- checkTypesExpr expr
+    (texpr, cexpr) <- checkTypesExpr expr
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." (Just expr) typeBool texpr)
-    checkTypesStmt stmt exRetType
-    return typeVoid
+    --TODO check if always true
+    (tstmt, cstmt) <- checkTypesStmt stmt exRetType
+    return (typeVoid, CSCond cexpr cstmt)
   SCondElse (TIf (pos, _)) expr stmt1 stmt2 -> do
-    texpr <- checkTypesExpr expr
+    (texpr, cexpr) <- checkTypesExpr expr
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." (Just expr) typeBool texpr)
-    tretif <- checkTypesStmt stmt1 exRetType
-    tretel <- checkTypesStmt stmt2 exRetType
+    (tretif, cstmt1) <- checkTypesStmt stmt1 exRetType
+    (tretel, cstmt2)<- checkTypesStmt stmt2 exRetType
     if (tretif == typeVoid || tretel == typeVoid)
-      then return typeVoid
-      else return exRetType
+      then return (typeVoid, CSCondElse cexpr cstmt1 cstmt2)
+      else return (exRetType, CSCondElse cexpr cstmt1 cstmt2)
   SWhile (TWhile (pos, _)) expr stmt -> do
-    texpr <- checkTypesExpr expr
+    (texpr, cexr) <- checkTypesExpr expr
+    --TODO check if always true
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in while condition." (Just expr) typeBool texpr)
-    checkTypesStmt stmt exRetType
-    return typeVoid
+    (trestmt, cstmt) <- checkTypesStmt stmt exRetType
+    return (typeVoid, CSWhile cexr cstmt)
   SExp expr -> do
-    checkTypesExpr expr
-    return typeVoid
+    (_, cexr) <- checkTypesExpr expr
+    return (typeVoid, CSExp cexr)
 
-checkTypesExpr :: Expr -> CheckerType Type
+checkTypesExpr :: Expr -> CheckerType (Type, CTExpr)
 checkTypesExpr exp = case exp of
   EVar pid@(PIdent (pos, id)) -> do
     mt <- lookupTypeEnv id
-    maybe (fail $ undecError pos id) (\(t, _, _)  -> return t) mt
+    maybe (fail $ undecError pos id) (\(t, _, _)  -> return (t, (CEVar id, t))) mt
   ELit lit -> case lit of
-    LInt _    -> return typeInt
-    LTrue     -> return typeBool
-    LFalse    -> return typeBool
-    LString _ -> return typeString
+    LInt _    -> return (typeInt, (CELit lit, typeInt))
+    LTrue     -> return (typeBool, (CELit lit, typeBool))
+    LFalse    -> return (typeBool, (CELit lit, typeBool))
+    LString _ -> return (typeString, (CELit lit, typeString))
   EApp pid@(PIdent (pos, id)) exps -> do
     mt <- lookupTypeEnv id
-    texps <- mapM (checkTypesExpr) exps
+    (texps, cexs) <- fmap unzip $ mapM (checkTypesExpr) exps
     case mt of
       Nothing      -> fail $ undecError pos id
       Just (t, decPos, _)  -> case t of
@@ -245,50 +279,54 @@ checkTypesExpr exp = case exp of
             when (ta /= te) $ fail $ typeError pos ("Function " ++ show id ++ " declared at " ++ show decPos ++
               " argument no. " ++ show i) (Just exp) ta te
             return ()) (zip4 targs texps exps [1..])
-          return treturn
+          return (treturn, (CEApp id cexs, treturn))
         _ -> fail $ show pos ++ "\n" ++ id ++ " declared at " ++ show decPos ++ "is not a function\n" ++
                "\nType found: " ++ printTree t
   EUnOp opr exp -> do
-    texp <- checkTypesExpr exp
+    (texp, cexp) <- checkTypesExpr exp
     case opr of
       ONeg (TMinus (pos, opr)) ->
         if texp == typeInt
-          then return typeInt
+          then return (typeInt, (CBinOp (CELit (LInt 0), typeInt) "-" cexp, typeInt))
           else fail $ typeError pos ("\nUnary operator " ++ show opr ++ " applied to" ++
             "non-integer expression.") (Just exp) typeInt  texp
       ONot (TExclM (pos, opr))  ->
         if texp == typeBool
-          then return typeBool
+          then return (typeBool, (CBinOp (CELit LTrue, typeBool) "^" cexp, typeBool))
           else fail $ typeError pos ("\nUnary operator " ++ show opr ++ " applied to" ++
             "non-boolean expression.") (Just exp) typeBool texp
         --TODO wydziel kod tych metod
   EMul expr1 (TMulOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeInt typeInt
   EAdd expr1 addop expr2 -> case addop of
     OPlus (TPlus info) -> do
-      texpr1 <- checkTypesExpr expr1
+      (texpr1, _) <- checkTypesExpr expr1
       if texpr1 == typeInt
         then checkTypesBinOp info expr1 expr2 typeInt typeInt
-        else checkTypesBinOp info expr1 expr2 typeString typeString
+        else do
+          (t, cexpr) <- checkTypesBinOp info expr1 expr2 typeString typeString
+          (texpr1, cexpr1) <- checkTypesExpr expr1
+          (texpr2, cexpr2) <- checkTypesExpr expr2
+          return (t, (CEApp concatStringName [cexpr1, cexpr2], t))
     OMinus (TMinus info) -> checkTypesBinOp info expr1 expr2 typeInt typeInt
   ERel expr1 (TRelOp info@(pos, opr)) expr2 ->
     if opr == eqOp
       then do
-         texpr1 <- checkTypesExpr expr1
-         texpr2 <- checkTypesExpr expr2
+         (texpr1, cexpr1) <- checkTypesExpr expr1
+         (texpr2, cexpr2) <- checkTypesExpr expr2
          when (texpr1 /= texpr2) $ fail $ typeError pos ("\nBinary operator " ++ show opr ++
                 " applied to expression.") (Just expr2) texpr1 texpr2
-         return typeBool
+         return (typeBool, (CBinOp cexpr1 opr cexpr2, typeBool))
       else checkTypesBinOp info expr1 expr2 typeInt typeBool
   EAnd expr1 (TLogAndOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeBool typeBool
   EOr expr1 (TLogOrOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeBool typeBool
 
 
-checkTypesBinOp :: ((Int, Int), String) -> Expr -> Expr -> Type -> Type -> CheckerType Type
+checkTypesBinOp :: ((Int, Int), String) -> Expr -> Expr -> Type -> Type -> CheckerType (Type, CTExpr)
 checkTypesBinOp (pos, opr) expl expr eType rtype = do
-  texpl <- checkTypesExpr expl
+  (texpl, cexpl) <- checkTypesExpr expl
   when (texpl /= eType) $ fail $ typeError pos ("\nBinary operator " ++ show opr ++
      " applied to expression.\n") (Just expl) eType texpl
-  texpr <- checkTypesExpr expr
+  (texpr, cexpr) <- checkTypesExpr expr
   when (texpr /= eType) $ fail $ typeError pos ("\nBinary operator " ++ show opr ++
        " applied to an expression.\n") (Just expr) eType texpr
-  return rtype
+  return (rtype, (CBinOp cexpl opr cexpr, rtype))

@@ -25,8 +25,8 @@ import qualified LLVM.General.AST as AST
 
 compileProg' :: String -> Program -> Err AST.Module
 compileProg' name prog = do
-  doChecks prog
-  compileProgram name prog
+  cprog <- doChecks prog
+  compileCProgram name cprog
 
 compileProg :: String -> Program -> IO (Err String)
 compileProg name prog =

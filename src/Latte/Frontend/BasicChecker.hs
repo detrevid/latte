@@ -4,15 +4,16 @@ import Latte.BNFC.ErrM
 import Latte.BNFC.AbsLatte
 import Latte.Frontend.TypeChecker
 import Latte.Internal.Type
+import Latte.Internal.ASTInternal
 
 import Latte.Backend.Compiler
 
 import Data.List
 
-doChecks :: Program -> Err ()
+doChecks :: Program -> Err CProgram
 doChecks prog = do
-  checkTypes prog
   checkForMain prog
+  checkTypes prog
 
 checkForMain :: Program -> Err ()
 checkForMain (Program tdefs) =

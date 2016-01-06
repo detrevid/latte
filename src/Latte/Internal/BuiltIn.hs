@@ -1,4 +1,4 @@
-module Latte.Internal.BuiltIn (addBuiltInsToTypeEnv, builtInsDescs) where
+module Latte.Internal.BuiltIn where
 
 import Latte.BNFC.AbsLatte
 import Latte.BNFC.ErrM
@@ -42,13 +42,20 @@ readStringArgs = []
 readStringInfo = (TFun readStringRetType [], binpos, bidepth)
 readStringDesc = (readStringRetType, readStringName, readStringArgs)
 
+concatStringName = "concatString"
+concatStringRetType = typeString
+concatStringArgs = [(typeString, "str1"), (typeString, "str2")]
+concatStringInfo = (TFun readStringRetType [typeString, typeString], binpos, bidepth)
+concatStringDesc = (concatStringRetType, concatStringName, concatStringArgs)
+
 builtInsTypes = Map.fromList [(printIntName, printIntInfo),
                               (printStringName, printStringInfo),
                               (errorName, errorInfo),
                               (readIntName, readIntInfo),
-                              (readStringName, readStringInfo)]
+                              (readStringName, readStringInfo),
+                              (concatStringName, concatStringInfo)]
 
-builtInsDescs = [printIntDesc, printStringDesc, errorDesc, readIntDesc, readStringDesc]
+builtInsDescs = [printIntDesc, printStringDesc, errorDesc, readIntDesc, readStringDesc, concatStringDesc]
 
 addBuiltInsToTypeEnv :: TypeEnv -> TypeEnv
 addBuiltInsToTypeEnv = flip Map.union builtInsTypes

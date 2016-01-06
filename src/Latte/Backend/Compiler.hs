@@ -1,12 +1,13 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module Latte.Backend.Compiler where
+module Latte.Backend.Compiler (compileCProgram, compileModuleToLLVM) where
 
 import Latte.BNFC.AbsLatte
 import qualified Latte.BNFC.AbsLatte as ABS
 import Latte.BNFC.ErrM
 import Latte.Internal.Type
 import Latte.Internal.BuiltIn
+import Latte.Internal.ASTInternal
 import Latte.Frontend.TypeChecker
 
 import LLVM.General.AST
@@ -288,17 +289,17 @@ compileModuleToLLVM mod = withContext $ \context ->
     compiled <- moduleLLVMAssembly m
     return compiled
 
-compileProgram' :: String -> Program -> CompilerType AST.Module
-compileProgram' name prog@(Program topdefs) = do
-  CompilerType $ modify (\s -> s { glFunTypeEnv = getGlobalDefsTypesEnv prog })
+compileCProgram' :: String -> CProgram -> CompilerType AST.Module
+compileCProgram' name prog@(CProgram topdefs) = do
+  CompilerType $ modify (\s -> s { glFunTypeEnv = getGlobalCDefsTypesEnv prog })
   decls <- funDeclForBuiltIns
-  defs <- mapM compileTopDef topdefs
+  defs <- mapM compileCTopDef topdefs
   strConstDefs <- getStrConstDefs
   let strDefault = globalStringConst (Name ".str_default") ""
   return $ newModule name ([strDefault] ++ strConstDefs ++ decls ++ defs)
 
-compileProgram :: String -> Program -> Err AST.Module
-compileProgram name prog = runCompilerType $ compileProgram' name prog
+compileCProgram :: String -> CProgram -> Err AST.Module
+compileCProgram name prog = runCompilerType $ compileCProgram' name prog
 
 store :: AST.Operand -> AST.Operand -> CompilerType ([AST.Named AST.Instruction])
 store address value = return $ [Do $ Store False address value Nothing 0 []]
@@ -333,162 +334,152 @@ allocAndStore t name oper = do
   addToEnv name op
   return $ inst ++ inst2
 
-call :: AST.Name -> AST.Type -> [Expr] -> CompilerType ([Named AST.Instruction], AST.Operand)
-call name retType args = do
-  compiled <- mapM compileExpr args
+callC :: AST.Name -> AST.Type -> [CTExpr] -> CompilerType ([Named AST.Instruction], AST.Operand)
+callC name retType args = do
+  compiled <- mapM compileCExpr args
   let compiledArgs = map snd compiled
       instrs = concatMap fst compiled
   ref <- getNewLocalName
   return (instrs ++ [ref := Call Nothing CallConv.C [] (Right $ ConstantOperand $ GlobalReference retType name)
     (map (\arg -> (arg, [])) compiledArgs) [] []], LocalReference (pointerReferent intType) ref)
 
-compileTopDef :: TopDef -> CompilerType AST.Definition
-compileTopDef x = case x of
-  TDFnDef tret pid@(PIdent (pos, ident)) args block -> do
+compileCTopDef :: CTopDef -> CompilerType AST.Definition
+compileCTopDef x = case x of
+  CTDFnDef tret ident args block -> do
     resetCompilerState
     tret' <- compileType tret
     let name = Name ident
-    params <- mapM (\(Arg atype (PIdent (_, aid))) -> do
+    params <- mapM (\(CArg atype aid) -> do
       atype' <- compileType atype
       let aname = Name aid
-      return $ Parameter atype' aname []
-      ) args
+      return $ Parameter atype' aname []) args
     instrs <- fmap concat $ mapM (\(Parameter atype aname _) ->
       allocAndStore atype aname (LocalReference atype aname)) params
     label  <- getNewLabel
     let startBlock = defaultBasicBlockInfo { blockName = label, blockBody = instrs }
-    (bblockis, _) <- compileBlock startBlock block
+    (bblockis, _) <- compileCBlock startBlock block
     bblocks <- mapM compileBasicBlockInfo bblockis
     return $ newGlobalFunctionDef tret' name params bblocks
 
-compileBlock :: BasicBlockInfo -> Block -> CompilerType ([BasicBlockInfo], (Maybe BasicBlockInfo))
-compileBlock bb (Block stmts) = do
+compileCBlock :: BasicBlockInfo -> CBlock -> CompilerType ([BasicBlockInfo], (Maybe BasicBlockInfo))
+compileCBlock bb (CBlock stmts) = do
   oldEnv <- getEnv
   (bbsnew, bbnew) <- foldM (\(bbs, bbnow) -> \stmt -> do
      case bbnow of
        Nothing -> return (bbs, bbnow)
        Just now -> do
-         (bbs', bbnow') <- compileStmt now stmt
+         (bbs', bbnow') <- compileCStmt now stmt
          return (bbs ++ bbs', bbnow')) ([], Just bb) stmts
   putEnv oldEnv
   return (bbsnew, bbnew)
 
-compileStmt :: BasicBlockInfo -> Stmt -> CompilerType ([BasicBlockInfo], (Maybe BasicBlockInfo))
-compileStmt bb x = case x of
-  SEmpty               -> return ([], Just bb)
-  SBlock block -> compileBlock bb block
-  --TODO does we really need Sexp to produce code?
-  SExp expr            -> do
-    (instrs, _) <- compileExpr expr
+compileCStmt :: BasicBlockInfo -> CStmt -> CompilerType ([BasicBlockInfo], (Maybe BasicBlockInfo))
+compileCStmt bb x = case x of
+  CSEmpty               -> return ([], Just bb)
+  CSBlock block -> compileCBlock bb block
+  CSExp expr            -> do
+    (instrs, _) <- compileCExpr expr
     return ([], Just $ addInstrs bb instrs)
-  SRet _ expr          -> do
-    (instrs, val) <- compileExpr expr
+  CSRet expr          -> do
+    (instrs, val) <- compileCExpr expr
     let bb' = addInstrs bb instrs
         bb'' = bb' { blockTerminator = Just $ Do $ Ret { returnOperand = Just val, metadata' = [] } }
     return ([bb''], Nothing)
-  SVRet _              -> do
+  CSVRet              -> do
     let bb' = bb { blockTerminator = Just $ Do $ Ret { returnOperand = Nothing, metadata' = [] } }
     return ([bb'], Nothing)
-  SDecl t items -> do
+  CSDecl t items -> do
     t' <- compileType t
     bb' <- foldM (\bb -> \item -> case item of
-      INoInit (PIdent (_, ident))   -> do
+      CINoInit ident   -> do
         (instrs1, val) <- defaultValue t
         instrs2 <- allocAndStore t' (Name ident) val
         let instrs = (instrs1 ++ instrs2)
         --traceM (show instrs)
         return $ addInstrs bb instrs
-      IInit pid@(PIdent (pos, ident)) exp -> do
-        (instrs1, val) <- compileExpr exp
+      CIInit ident exp -> do
+        (instrs1, val) <- compileCExpr exp
         instrs2 <- allocAndStore t' (Name ident) val
         return $ addInstrs bb (instrs1 ++ instrs2)
           ) bb items
     return ([], Just bb')
-  SAss (PIdent (_, ident)) expr -> do
-    (instrs1, val) <- compileExpr expr
+  CSAss ident expr -> do
+    (instrs1, val) <- compileCExpr expr
     instrs2 <- storeVar ident val
     return ([], Just $ addInstrs bb (instrs1 ++ instrs2))
-  SDIncr pid (TDIOp (_, opr)) -> case () of
-    _ | opr == "++" ->
-      compileStmt bb (SAss pid (EAdd (EVar pid) (OPlus $ TPlus ((0, 0), "+")) (ELit $ LInt 1) ))
-      | opr == "--" ->
-      compileStmt bb (SAss pid (EAdd (EVar pid) (OMinus $ TMinus ((0, 0), "-")) (ELit $ LInt 1) ))
-  SCondElse _ expr stmt1 stmt2 -> do
-    (instrs1, val) <- compileExpr expr
+  CSCondElse expr stmt1 stmt2 -> do
+    (instrs1, val) <- compileCExpr expr
     trueLabel <- getNewLabel
     let trueBlock = defaultBasicBlockInfo { blockName = trueLabel }
-    (bbisT, mbbiT) <- compileStmt trueBlock stmt1
+    (bbisT, mbbiT) <- compileCStmt trueBlock stmt1
     falseLabel <- getNewLabel
     let falseBlock = defaultBasicBlockInfo { blockName = falseLabel }
-    (bbisF, mbbiF) <- compileStmt falseBlock stmt2
+    (bbisF, mbbiF) <- compileCStmt falseBlock stmt2
     afterCond <- getNewLabel
     let bbisT' = maybe bbisT (\bbi -> bbisT ++ [bbi { blockTerminator = Just $ Do $ Br afterCond [] }]) mbbiT
         bbisF' = maybe bbisF (\bbi -> bbisF ++ [bbi { blockTerminator = Just $ Do $ Br afterCond [] }]) mbbiF
         nowTerm = Just $ Do $ CondBr val trueLabel falseLabel []
         bb' = (addInstrs bb instrs1) { blockTerminator = nowTerm}
     return ([bb'] ++ bbisT' ++ bbisF', Just $ defaultBasicBlockInfo { blockName = afterCond })
-  SCond _  expr stmt1 -> do
-    (instrs1, val) <- compileExpr expr
+  CSCond expr stmt1 -> do
+    (instrs1, val) <- compileCExpr expr
     trueLabel <- getNewLabel
     let trueBlock = defaultBasicBlockInfo { blockName = trueLabel }
-    (bbisT, mbbiT) <- compileStmt trueBlock stmt1
+    (bbisT, mbbiT) <- compileCStmt trueBlock stmt1
     afterCond <- getNewLabel
     let bbisT' = maybe bbisT (\bbi -> bbisT ++ [bbi { blockTerminator = Just $ Do $ Br afterCond [] }]) mbbiT
         nowTerm = Just $ Do $ CondBr val trueLabel afterCond []
         bb' = (addInstrs bb instrs1) { blockTerminator = nowTerm}
     return ([bb'] ++ bbisT', Just $ defaultBasicBlockInfo { blockName = afterCond })
-  SWhile _ expr stmt -> do
+  CSWhile expr stmt -> do
     condLabel <- getNewLabel
     let bb' = bb { blockTerminator = Just $ Do $ Br condLabel []}
         condBlock = defaultBasicBlockInfo { blockName = condLabel }
-    (instrs, val) <- compileExpr expr
+    (instrs, val) <- compileCExpr expr
     whileBodyLabel <- getNewLabel
     let whileBodyBlock = defaultBasicBlockInfo { blockName = whileBodyLabel }
-    (bbis, mbbi) <- compileStmt whileBodyBlock stmt
+    (bbis, mbbi) <- compileCStmt whileBodyBlock stmt
     afterWhileLabel <- getNewLabel
     let bbis' = maybe bbis (\bbi -> bbis ++ [bbi { blockTerminator = Just $ Do $ Br condLabel [] }]) mbbi
         condBlock' = condBlock { blockBody = instrs, blockTerminator =  Just $ Do $ CondBr val whileBodyLabel afterWhileLabel [] }
     return ([bb', condBlock'] ++ bbis', Just $ defaultBasicBlockInfo { blockName = afterWhileLabel } )
 
-relOprs = Map.fromList [
-  ("<", IntPred.SLT),
-  ("<=", IntPred.SLE),
-  (">", IntPred.SGT),
-  (">=", IntPred.SGE),
-  ("==", IntPred.EQ),
-  ("!=", IntPred.NE)
+binOprs = Map.fromList [
+  ("<", AST.ICmp IntPred.SLT),
+  ("<=", AST.ICmp IntPred.SLE),
+  (">", AST.ICmp IntPred.SGT),
+  (">=", AST.ICmp IntPred.SGE),
+  ("==", AST.ICmp IntPred.EQ),
+  ("!=", AST.ICmp IntPred.NE),
+  ("+", AST.Add False False),
+  ("-", AST.Sub False False),
+  ("*", AST.Mul False False),
+  ("/", AST.SDiv False),
+  ("%", AST.SRem),
+  ("||", AST.And),
+  ("&&", AST.Or),
+  ("^", AST.Xor)
   ]
 
-compileExpr :: Expr -> CompilerType ([AST.Named AST.Instruction], AST.Operand)
-compileExpr x = case x of
-  ELit lit -> case lit of
+compileCExpr :: CTExpr -> CompilerType ([AST.Named AST.Instruction], AST.Operand)
+compileCExpr (x, tx) = case x of
+  CELit lit -> case lit of
     LInt val    -> return ([], getIntConstOper val)
     LTrue       -> return ([], getBoolConstOper True)
     LFalse      -> return ([], getBoolConstOper False)
     LString str -> getRefToStringConst str
-    --TODO other types
-  EApp (PIdent (_, ident)) args -> do
+  CEApp ident args -> do
     retType <- getRetType ident
-    call (Name ident) retType args
-  EVar (PIdent (_, ident)) -> loadVar ident
-  ERel expr1 (TRelOp (_, opr)) expr2 -> compileBinOpr expr1 expr2 (AST.ICmp (relOprs Map.! opr)) boolType
-  EAdd expr1 opr expr2 -> case opr of
-    OPlus _ -> compileBinOpr expr1 expr2 (AST.Add False False) intType
-    OMinus _ -> compileBinOpr expr1 expr2 (AST.Sub False False) intType
-  EMul expr1 (TMulOp (_, opr)) expr2 -> case () of
-    _ | opr == "*" -> compileBinOpr expr1 expr2 (AST.Mul False False) intType
-      | opr == "/" -> compileBinOpr expr1 expr2 (AST.SDiv False) intType
-  EAnd expr1 _ expr2 -> compileBinOpr expr1 expr2  AST.And boolType
-  EOr expr1 _ expr2 -> compileBinOpr expr1 expr2  AST.Or boolType
-  EUnOp unop expr -> case unop of
-    ONeg _ -> compileBinOpr (ELit (LInt 0)) expr (AST.Sub False False) intType
-    ONot _ -> compileBinOpr (ELit LTrue) expr AST.Xor boolType
+    callC (Name ident) retType args
+  CEVar ident -> loadVar ident
+  CBinOp expr1 opr expr2 -> compileCBinOpr expr1 expr2 opr tx
 
-compileBinOpr :: Expr -> Expr -> (AST.Operand -> AST.Operand -> AST.InstructionMetadata -> AST.Instruction)
-  -> AST.Type -> CompilerType ([AST.Named AST.Instruction], AST.Operand)
-compileBinOpr expr1 expr2 binOpF retT = do
-  (instrs1, oper1) <- compileExpr expr1
-  (instrs2, oper2) <- compileExpr expr2
+compileCBinOpr :: CTExpr -> CTExpr -> String -> ABS.Type -> CompilerType ([AST.Named AST.Instruction], AST.Operand)
+compileCBinOpr expr1 expr2 binOp retT = do
+  cretT <- compileType retT
+  let binOpF = (binOprs Map.! binOp)
+  (instrs1, oper1) <- compileCExpr expr1
+  (instrs2, oper2) <- compileCExpr expr2
   ref <- getNewLocalName
   let ass = ref := binOpF oper1 oper2 []
-  return  (instrs1 ++ instrs2 ++ [ass], LocalReference retT ref)
+  return  (instrs1 ++ instrs2 ++ [ass], LocalReference cretT ref)
