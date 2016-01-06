@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module Latte.Frontend.TypeChecker where
+module Latte.Frontend.TypeChecker (checkTypes, getGlobalDefsTypesEnv) where
 
 import Latte.BNFC.AbsLatte
 import Latte.BNFC.ErrM
@@ -26,7 +26,7 @@ newtype CheckerType a = CheckerType (StateT CheckerState Err a)
   deriving (Functor, Applicative, Monad)
 
 runCheckerType :: CheckerType a -> Err a
-runCheckerType (CheckerType x) = evalStateT x (emptyEnv, topLevelDepth)
+runCheckerType (CheckerType x) = evalStateT x (emptyTypeEnv, topLevelDepth)
 
 putEnv' :: TypeEnv -> CheckerState -> CheckerState
 putEnv' env (_, depth) =  (env, depth)
@@ -53,13 +53,10 @@ removeFromEnv' id (env, depth) =
 removeFromEnv :: String ->  CheckerType ()
 removeFromEnv id = CheckerType $ modify $ removeFromEnv' id
 
-lookupTypeEnv' :: Monad m => TypeEnv -> String -> m (Maybe TypeInfo)
-lookupTypeEnv' env id = return $ Map.lookup id env
-
 lookupTypeEnv :: String -> CheckerType (Maybe TypeInfo)
 lookupTypeEnv id = do
   env <- getEnv
-  lookupTypeEnv' env id
+  return $ Map.lookup id env
 
 getDepth :: CheckerType Int
 getDepth = CheckerType $ gets snd
@@ -95,12 +92,24 @@ redecError pos id decPos =
 
 checkTypes' :: Program -> CheckerType ()
 checkTypes' prog@(Program topdefs) = do
-  putEnv $ addBuiltInsToTypeEnv emptyEnv
+  putEnv $ addBuiltInsToTypeEnv emptyTypeEnv
   addTopDefsToEnv prog
   mapM_ checkTypesTopDef topdefs
 
 checkTypes :: Program -> Err ()
 checkTypes prog =  runCheckerType $ checkTypes' prog
+
+getGlobalDefsTypesEnv' :: Program -> CheckerType TypeEnv
+getGlobalDefsTypesEnv' prog = do
+  putEnv $ addBuiltInsToTypeEnv emptyTypeEnv
+  addTopDefsToEnv prog
+  getEnv
+
+getGlobalDefsTypesEnv :: Program -> TypeEnv
+getGlobalDefsTypesEnv prog =
+  case (runCheckerType $ getGlobalDefsTypesEnv' prog) of
+    Ok env -> env
+    Bad m -> emptyTypeEnv
 
 addTopDefsToEnv :: Program -> CheckerType ()
 addTopDefsToEnv (Program tdefs) =

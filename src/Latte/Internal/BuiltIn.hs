@@ -1,4 +1,4 @@
-module Latte.Internal.BuiltIn (addBuiltInsToTypeEnv) where
+module Latte.Internal.BuiltIn (addBuiltInsToTypeEnv, builtInsDescs) where
 
 import Latte.BNFC.AbsLatte
 import Latte.BNFC.ErrM
@@ -13,25 +13,42 @@ binpos = (-1,-1)
 bidepth = 0
 
 printIntName = "printInt"
-printIntInfo = (TFun typeVoid [typeInt], binpos, bidepth)
+printIntRetType = typeVoid
+printIntArgs = [(typeInt, "x")]
+printIntInfo = (TFun printIntRetType [typeInt], binpos, bidepth)
+printIntDesc = (printIntRetType, printIntName, printIntArgs)
 
 printStringName = "printString"
-printStringInfo = (TFun typeVoid [typeString], binpos, bidepth)
+printStringRetType = typeVoid
+printStringArgs = [(typeString, "s")]
+printStringInfo = (TFun printStringRetType [typeString], binpos, bidepth)
+printStringDesc = (printStringRetType, printStringName, printStringArgs)
 
 errorName = "error"
-errorInfo = (TFun typeVoid [], binpos, bidepth)
+errorRetType = typeVoid
+errorArgs = []
+errorInfo = (TFun errorRetType [], binpos, bidepth)
+errorDesc = (errorRetType, errorName, errorArgs)
 
 readIntName = "readInt"
-readIntInfo = (TFun typeInt [], binpos, bidepth)
+readIntRetType = typeInt
+readIntArgs = []
+readIntInfo = (TFun readIntRetType [], binpos, bidepth)
+readIntDesc = (readIntRetType, readIntName, readIntArgs)
 
 readStringName = "readString"
-readStringInfo = (TFun typeString [], binpos, bidepth)
+readStringRetType = typeString
+readStringArgs = []
+readStringInfo = (TFun readStringRetType [], binpos, bidepth)
+readStringDesc = (readStringRetType, readStringName, readStringArgs)
 
 builtInsTypes = Map.fromList [(printIntName, printIntInfo),
                               (printStringName, printStringInfo),
                               (errorName, errorInfo),
                               (readIntName, readIntInfo),
                               (readStringName, readStringInfo)]
+
+builtInsDescs = [printIntDesc, printStringDesc, errorDesc, readIntDesc, readStringDesc]
 
 addBuiltInsToTypeEnv :: TypeEnv -> TypeEnv
 addBuiltInsToTypeEnv = flip Map.union builtInsTypes

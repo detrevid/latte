@@ -29,8 +29,8 @@ type VarId = String
 type TypeInfo = (Type, Position, Int)
 
 type TypeEnv = Map.Map String TypeInfo
-emptyEnv :: TypeEnv
-emptyEnv = Map.empty
+emptyTypeEnv :: TypeEnv
+emptyTypeEnv = Map.empty
 
 negOp = "-"
 notOp = "!"
