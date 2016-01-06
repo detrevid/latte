@@ -3,7 +3,7 @@ version:              0.1.0.0
 build-type:           Simple
 cabal-version:        >=1.10
 
-executable latte
+executable latc_llvm
   main-is:              Latte/Main.hs
   build-depends:        base >= 4.7 && < 5, base, array, mtl, containers, transformers, process, filepath,
                           llvm-general-pure, llvm-general
