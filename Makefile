@@ -18,8 +18,8 @@ $(RUNTIMEBC): $(RUNTIMELL)
 
 $(CONFIGURE): $(CABAL_FILE)
 	cabal update
-	cabal configure --enable-tests
 	cabal install --only-dependencies
+	cabal configure --enable-tests
 
 configure: $(CONFIGURE)
 
