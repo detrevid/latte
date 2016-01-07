@@ -72,7 +72,6 @@ decDepth :: CheckerType ()
 decDepth = CheckerType $ modify $ changeDepth' (1-)
 
 --TODO - use it everywhere
---TODO - maybe add expression that has the bad type
 typeError :: Position -> String -> Maybe Expr -> Type -> Type -> String
 typeError pos errMsg mexpr texpected tfound  =
   "Type Error\n" ++
@@ -317,13 +316,13 @@ checkTypesExpr exp = case exp of
           return (t, (CEApp concatStringName [cexpr1, cexpr2], t))
     OMinus (TMinus info) -> checkTypesBinOp info expr1 expr2 typeInt typeInt
   ERel expr1 (TRelOp info@(pos, opr)) expr2 ->
-    if opr == eqOp
+    if opr == eqOp || opr == neqOp
       then do
-         (texpr1, cexpr1) <- checkTypesExpr expr1
-         (texpr2, cexpr2) <- checkTypesExpr expr2
-         when (texpr1 /= texpr2) $ fail $ typeError pos ("\nBinary operator " ++ show opr ++
-                " applied to expression.") (Just expr2) texpr1 texpr2
-         return (typeBool, (CBinOp cexpr1 opr cexpr2, typeBool))
+        (texpr1, cexpr1) <- checkTypesExpr expr1
+        (texpr2, cexpr2) <- checkTypesExpr expr2
+        when (texpr1 /= texpr2) $ fail $ typeError pos ("\nBinary operator " ++ show opr ++
+              " applied to expression.") (Just expr2) texpr1 texpr2
+        return (typeBool, (CBinOp cexpr1 opr cexpr2, typeBool))
       else checkTypesBinOp info expr1 expr2 typeInt typeBool
   EAnd expr1 (TLogAndOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeBool typeBool
   EOr expr1 (TLogOrOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeBool typeBool

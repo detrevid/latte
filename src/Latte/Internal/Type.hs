@@ -36,3 +36,4 @@ negOp = "-"
 notOp = "!"
 
 eqOp = "=="
+neqOp = "!="
