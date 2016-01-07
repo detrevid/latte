@@ -236,7 +236,7 @@ checkTypesStmt x exRetType = case x of
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." (Just expr) typeBool texpr)
     --TODO check if always true
     (tstmt, cstmt) <- checkTypesStmt stmt exRetType
-    return (typeVoid, CSCond cexpr cstmt)
+    return (typeVoid, CSCondElse cexpr cstmt CSEmpty)
   SCondElse (TIf (pos, _)) expr stmt1 stmt2 -> do
     (texpr, cexpr) <- checkTypesExpr expr
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." (Just expr) typeBool texpr)

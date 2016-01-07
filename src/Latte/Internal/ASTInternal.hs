@@ -27,7 +27,6 @@ data CStmt
     | CSAss CIdent CTExpr
     | CSRet CTExpr
     | CSVRet
-    | CSCond CTExpr CStmt
     | CSCondElse CTExpr CStmt CStmt
     | CSWhile CTExpr CStmt
     | CSExp CTExpr
