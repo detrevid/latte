@@ -237,7 +237,7 @@ checkTypesStmt x exRetType = case x of
     (texpr, cexpr) <- checkTypesExpr expr
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." (Just expr) typeBool texpr)
     (tstmt, cstmt) <- checkTypesStmt stmt exRetType
-    if isTrue cexpr
+    if isCTExprTrue cexpr
       then return (tstmt, cstmt)
       else return (typeVoid, CSCondElse cexpr cstmt CSEmpty)
   SCondElse (TIf (pos, _)) expr stmt1 stmt2 -> do
@@ -245,7 +245,7 @@ checkTypesStmt x exRetType = case x of
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." (Just expr) typeBool texpr)
     (tretif, cstmt1) <- checkTypesStmt stmt1 exRetType
     (tretel, cstmt2)<- checkTypesStmt stmt2 exRetType
-    case (isTrue cexpr, isFalse cexpr) of
+    case (isCTExprTrue cexpr, isCTExprFalse cexpr) of
       (True, _) -> return (tretif, cstmt1)
       (_, True) -> return (tretel, cstmt2)
       (_, _)    ->
@@ -256,20 +256,12 @@ checkTypesStmt x exRetType = case x of
     (texpr, cexpr) <- checkTypesExpr expr
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in while condition." (Just expr) typeBool texpr)
     (trestmt, cstmt) <- checkTypesStmt stmt exRetType
-    if isTrue cexpr
-      then return (trestmt, CSWhile cexpr cstmt)
+    if isCTExprTrue cexpr
+      then return (exRetType, CSRepeat cstmt)
       else return (typeVoid, CSWhile cexpr cstmt)
   SExp expr -> do
     (_, cexr) <- checkTypesExpr expr
     return (typeVoid, CSExp cexr)
-
-isTrue :: CTExpr -> Bool
-isTrue (CELit LTrue, _) = True
-isTrue _ = False
-
-isFalse :: CTExpr -> Bool
-isFalse (CELit LFalse, _) = True
-isFalse _ = False
 
 checkTypesExpr :: Expr -> CheckerType (Type, CTExpr)
 checkTypesExpr exp = case exp of

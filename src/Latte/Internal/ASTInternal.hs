@@ -29,6 +29,7 @@ data CStmt
     | CSVRet
     | CSCondElse CTExpr CStmt CStmt
     | CSWhile CTExpr CStmt
+    | CSRepeat CStmt
     | CSExp CTExpr
   deriving (Eq, Ord, Show, Read)
 
@@ -40,3 +41,11 @@ data CExpr
     | CEApp CIdent [CTExpr]
     | CBinOp CTExpr COperator CTExpr
   deriving (Eq, Ord, Show, Read)
+
+isCTExprTrue :: CTExpr -> Bool
+isCTExprTrue (CELit LTrue, _) = True
+isCTExprTrue _ = False
+
+isCTExprFalse :: CTExpr -> Bool
+isCTExprFalse (CELit LFalse, _) = True
+isCTExprFalse _ = False

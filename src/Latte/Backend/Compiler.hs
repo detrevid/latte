@@ -496,10 +496,19 @@ compileCStmt x = case x of
     whileBodyLabel <- newBlock
     setCurrentBlock whileBodyLabel
     compileCStmt stmt
+    afterWhileBodyLabel <- getCurrentBlock
     afterWhileLabel <- newBlock
-    setUnBlockTerminator whileBodyLabel $ Do $ Br condLabel []
+    setUnBlockTerminator afterWhileBodyLabel $ Do $ Br condLabel []
     setUnBlockTerminator condLabel $ Do $ CondBr val whileBodyLabel afterWhileLabel []
     setCurrentBlock afterWhileLabel
+    return ()
+  CSRepeat stmt -> do
+    repeatBodyLabel <- newBlock
+    setCurrentBlockTerminator $ Do $ Br repeatBodyLabel []
+    setCurrentBlock repeatBodyLabel
+    compileCStmt stmt
+    afterRepeatBodyLabel <- getCurrentBlock
+    setUnBlockTerminator afterRepeatBodyLabel $ Do $ Br repeatBodyLabel []
     return ()
 
 binOprs = Map.fromList [
