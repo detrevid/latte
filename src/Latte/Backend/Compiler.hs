@@ -531,10 +531,9 @@ binOprs = Map.fromList [
 compileCExpr :: CTExpr -> CompilerType AST.Operand
 compileCExpr (x, tx) = case x of
   CELit lit -> case lit of
-    LInt val    -> return $ getIntConstOper val
-    LTrue       -> return $ getBoolConstOper True
-    LFalse      -> return $ getBoolConstOper False
-    LString str -> do
+    CLInt val    -> return $ getIntConstOper val
+    CLBool val   -> return $ getBoolConstOper val
+    CLString str -> do
       (instrs, oper) <- getRefToStringConst str
       addInstrsToCurrentBlock instrs
       return oper

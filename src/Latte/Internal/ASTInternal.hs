@@ -35,17 +35,20 @@ data CStmt
 
 type CTExpr = (CExpr, Type)
 
+data CLiteral = CLInt Integer | CLBool Bool | CLString String
+  deriving (Eq, Ord, Show, Read)
+
 data CExpr
     = CEVar CIdent
-    | CELit Literal
+    | CELit CLiteral
     | CEApp CIdent [CTExpr]
     | CBinOp CTExpr COperator CTExpr
   deriving (Eq, Ord, Show, Read)
 
 isCTExprTrue :: CTExpr -> Bool
-isCTExprTrue (CELit LTrue, _) = True
+isCTExprTrue (CELit (CLBool val), _) = val
 isCTExprTrue _ = False
 
 isCTExprFalse :: CTExpr -> Bool
-isCTExprFalse (CELit LFalse, _) = True
+isCTExprFalse (CELit (CLBool val), _) = not val
 isCTExprFalse _ = False

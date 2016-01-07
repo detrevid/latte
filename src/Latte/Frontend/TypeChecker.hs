@@ -224,7 +224,7 @@ checkTypesStmt x exRetType = case x of
       Just (t, _, _)  ->
         if t /= typeInt
           then fail $ typeError pos ("Variable " ++ show id) Nothing typeInt  t
-          else return (typeVoid, (CSAss id ((CBinOp ((CEVar id), t) opr' ((CELit (LInt 1)), typeInt)), typeInt)))
+          else return (typeVoid, (CSAss id ((CBinOp ((CEVar id), t) opr' ((CELit (CLInt 1)), typeInt)), typeInt)))
   SRet (TRet (pos, _)) expr -> do
     (texpr, cexpr) <- checkTypesExpr expr
     when (texpr /= exRetType) (fail $ typeError pos "Bad return type." (Just expr) exRetType texpr)
@@ -262,16 +262,90 @@ checkTypesStmt x exRetType = case x of
     (_, cexr) <- checkTypesExpr expr
     return (typeVoid, CSExp cexr)
 
+relOprs = ["<", "<=",  ">", ">=", "==", "!="]
+relOprsFs :: Map.Map String (Integer -> Integer -> Bool)
+relOprsFs = Map.fromList [
+  ("<", (<)),
+  ("<=", (<=)),
+  (">", (>)),
+  (">=", (>=)),
+  ("==", (==)),
+  ("!=", (/=))
+  ]
+
+artOprs = ["+", "-",  "*", "/", "%"]
+artOprsFs :: Map.Map String (Integer -> Integer -> Integer)
+artOprsFs = Map.fromList [
+  ("+", (+)),
+  ("-", (-)),
+  ("*", (*)),
+  ("/", quot),
+  ("%", rem)
+  ]
+
+boolOprs = ["||", "&&", "==", "!=", "^"]
+boolOprsFs :: Map.Map String (Bool -> Bool -> Bool)
+boolOprsFs = Map.fromList [
+  ("||", (||)),
+  ("&&", (&&)),
+  ("==", (==)),
+  ("!=", (/=)),
+  ("^", (\x y -> x /= y))
+  ]
+
+strOprs = ["+"]
+strOprsFs :: Map.Map String (String -> String -> String)
+strOprsFs = Map.fromList [
+  ("+", (++))
+  ]
+
+strEqOprs = ["==", "!="]
+strEqOprsFs = Map.fromList [
+  ("==", (==)),
+  ("!=", (/=))
+  ]
+
+constantFolding :: CTExpr -> CheckerType CTExpr
+constantFolding ctexpr@(CBinOp exp1 op exp2, t) = do
+  exp1' <- constantFolding exp1
+  exp2' <- constantFolding exp2
+  case (exp1', exp2') of
+    ((CELit lit1, tl1), (CELit lit2, tl2)) ->
+      case (lit1, lit2) of
+        (CLInt val1, CLInt val2) ->
+          case (elem op relOprs, elem op artOprs) of
+            (True, _) -> let opF = (relOprsFs Map.! op) in return (CELit $ CLBool $ opF val1 val2, typeBool)
+            (_, True) -> let opF = (artOprsFs Map.! op) in return (CELit $ CLInt $ opF val1 val2, typeInt)
+            _         -> fail $ internalErrMsg
+        (CLBool val1, CLBool val2) ->
+          if (elem op boolOprs)
+            then let opF = (boolOprsFs Map.! op) in return (CELit $ CLBool $ opF val1 val2, typeBool)
+            else fail $ internalErrMsg
+        (CLString str1, CLString str2) ->
+          case (elem op strOprs, elem op strEqOprs) of
+            (True, _) -> let opF = (strOprsFs Map.! op) in return (CELit $ CLString $ opF str1 str2, typeString)
+            (_, True) -> let opF = (strEqOprsFs Map.! op) in return (CELit $ CLBool $ opF str1 str2, typeBool)
+            _         -> fail $ internalErrMsg
+        _ -> fail $ internalErrMsg
+    _ -> return ctexpr
+constantFolding x = return x
+
 checkTypesExpr :: Expr -> CheckerType (Type, CTExpr)
-checkTypesExpr exp = case exp of
+checkTypesExpr expr = do
+  (t, cexpr) <- checkTypesExpr' expr
+  cexpr' <- constantFolding cexpr
+  return (t, cexpr')
+
+checkTypesExpr' :: Expr -> CheckerType (Type, CTExpr)
+checkTypesExpr' x = case x of
   EVar pid@(PIdent (pos, id)) -> do
     mt <- lookupTypeEnv id
     maybe (fail $ undecError pos id) (\(t, _, _)  -> return (t, (CEVar id, t))) mt
   ELit lit -> case lit of
-    LInt _    -> return (typeInt, (CELit lit, typeInt))
-    LTrue     -> return (typeBool, (CELit lit, typeBool))
-    LFalse    -> return (typeBool, (CELit lit, typeBool))
-    LString _ -> return (typeString, (CELit lit, typeString))
+    LInt val    -> return (typeInt, (CELit (CLInt val), typeInt))
+    LTrue       -> return (typeBool, (CELit (CLBool True), typeBool))
+    LFalse      -> return (typeBool, (CELit (CLBool False), typeBool))
+    LString str -> return (typeString, (CELit (CLString str), typeString))
   EApp pid@(PIdent (pos, id)) exps -> do
     mt <- lookupTypeEnv id
     (texps, cexs) <- fmap unzip $ mapM (checkTypesExpr) exps
@@ -294,12 +368,12 @@ checkTypesExpr exp = case exp of
     case opr of
       ONeg (TMinus (pos, opr)) ->
         if texp == typeInt
-          then return (typeInt, (CBinOp (CELit (LInt 0), typeInt) "-" cexp, typeInt))
+          then return (typeInt, (CBinOp (CELit (CLInt 0), typeInt) "-" cexp, typeInt))
           else fail $ typeError pos ("\nUnary operator " ++ show opr ++ " applied to" ++
             "non-integer expression.") (Just exp) typeInt  texp
       ONot (TExclM (pos, opr))  ->
         if texp == typeBool
-          then return (typeBool, (CBinOp (CELit LTrue, typeBool) "^" cexp, typeBool))
+          then return (typeBool, (CBinOp (CELit (CLBool True), typeBool) "^" cexp, typeBool))
           else fail $ typeError pos ("\nUnary operator " ++ show opr ++ " applied to" ++
             "non-boolean expression.") (Just exp) typeBool texp
         --TODO wydziel kod tych metod
@@ -313,7 +387,11 @@ checkTypesExpr exp = case exp of
           (t, cexpr) <- checkTypesBinOp info expr1 expr2 typeString typeString
           (texpr1, cexpr1) <- checkTypesExpr expr1
           (texpr2, cexpr2) <- checkTypesExpr expr2
-          return (t, (CEApp concatStringName [cexpr1, cexpr2], t))
+          cexprFolded <- constantFolding $ (CBinOp cexpr1 "+" cexpr2, t)
+          case cexprFolded of
+            (CBinOp cexpr1 _ cexpr2, _) -> return (t, (CEApp concatStringName [cexpr1, cexpr2], t))
+            (CELit _, _) -> return (t, cexprFolded)
+            _ -> fail internalErrMsg
     OMinus (TMinus info) -> checkTypesBinOp info expr1 expr2 typeInt typeInt
   ERel expr1 (TRelOp info@(pos, opr)) expr2 ->
     if opr == eqOp || opr == neqOp
