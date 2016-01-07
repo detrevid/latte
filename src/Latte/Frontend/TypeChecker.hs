@@ -157,12 +157,14 @@ checkTypesTopDef tdef = case tdef of
     cargs <- mapM (\(Arg t (PIdent (pos, id))) -> do
       addToEnv id (t, pos, depth)
       return $ CArg t id) args
-    (tblock, cblock) <- checkTypesBlock block tret
+    (tblock, CBlock cblock) <- checkTypesBlock block tret
     when (tblock /= tret) (fail $ typeError pos ("Function " ++ id ++
       " not always returns expected type.") Nothing tret tblock)
     decDepth
     putEnv oldEnv
-    return $ CTDFnDef tret id cargs cblock
+    if tret == typeVoid
+      then return $ CTDFnDef tret id cargs (CBlock $ cblock ++ [CSVRet])
+      else return $ CTDFnDef tret id cargs (CBlock cblock)
 
 checkTypesBlock :: Block -> Type -> CheckerType (Type, CBlock)
 checkTypesBlock (Block stmts) exRetType = do
@@ -234,26 +236,40 @@ checkTypesStmt x exRetType = case x of
   SCond (TIf (pos, _)) expr stmt -> do
     (texpr, cexpr) <- checkTypesExpr expr
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." (Just expr) typeBool texpr)
-    --TODO check if always true
     (tstmt, cstmt) <- checkTypesStmt stmt exRetType
-    return (typeVoid, CSCondElse cexpr cstmt CSEmpty)
+    if isTrue cexpr
+      then return (tstmt, cstmt)
+      else return (typeVoid, CSCondElse cexpr cstmt CSEmpty)
   SCondElse (TIf (pos, _)) expr stmt1 stmt2 -> do
     (texpr, cexpr) <- checkTypesExpr expr
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." (Just expr) typeBool texpr)
     (tretif, cstmt1) <- checkTypesStmt stmt1 exRetType
     (tretel, cstmt2)<- checkTypesStmt stmt2 exRetType
-    if (tretif == typeVoid || tretel == typeVoid)
-      then return (typeVoid, CSCondElse cexpr cstmt1 cstmt2)
-      else return (exRetType, CSCondElse cexpr cstmt1 cstmt2)
+    case (isTrue cexpr, isFalse cexpr) of
+      (True, _) -> return (tretif, cstmt1)
+      (_, True) -> return (tretel, cstmt2)
+      (_, _)    ->
+        if (tretif == typeVoid || tretel == typeVoid)
+          then return (typeVoid, CSCondElse cexpr cstmt1 cstmt2)
+          else return (exRetType, CSCondElse cexpr cstmt1 cstmt2)
   SWhile (TWhile (pos, _)) expr stmt -> do
-    (texpr, cexr) <- checkTypesExpr expr
-    --TODO check if always true
+    (texpr, cexpr) <- checkTypesExpr expr
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in while condition." (Just expr) typeBool texpr)
     (trestmt, cstmt) <- checkTypesStmt stmt exRetType
-    return (typeVoid, CSWhile cexr cstmt)
+    if isTrue cexpr
+      then return (trestmt, CSWhile cexpr cstmt)
+      else return (typeVoid, CSWhile cexpr cstmt)
   SExp expr -> do
     (_, cexr) <- checkTypesExpr expr
     return (typeVoid, CSExp cexr)
+
+isTrue :: CTExpr -> Bool
+isTrue (CELit LTrue, _) = True
+isTrue _ = False
+
+isFalse :: CTExpr -> Bool
+isFalse (CELit LFalse, _) = True
+isFalse _ = False
 
 checkTypesExpr :: Expr -> CheckerType (Type, CTExpr)
 checkTypesExpr exp = case exp of

@@ -25,16 +25,15 @@ import LLVM.General.Context
 import LLVM.General.Module
 
 import Control.Conditional
+import qualified Control.Conditional as Cond
 import qualified Data.Map as Map
 import Debug.Trace
 import Data.Char
 import Data.List
 import Data.Maybe
-import Control.Applicative (Applicative) 
-import Control.Monad
+import Control.Applicative (Applicative)
 import Control.Monad.State
-import Control.Monad.Except
-
+import qualified Control.Monad.Except as Except
 import qualified Control.Monad.Trans.State as StateT
 
 internalErrMsg = "Internal error during llvm compiling phase"
@@ -178,7 +177,7 @@ addStringConst str = do
 getRefToStringConst :: String -> CompilerType ([AST.Named AST.Instruction], AST.Operand)
 getRefToStringConst str = do
   strConstEnv <- CompilerType $ gets stringConsts
-  case (Map.lookup str strConstEnv) of
+  case (Map.lookup (str ++ endOfStringSign) strConstEnv) of
     Nothing -> do
       name <- addStringConst str
       ref <- getNewLocalName
@@ -356,15 +355,12 @@ globalStringConst name s =
     initializer  = Just $ Array charType (map getCharConst s)
     }
 
-liftError :: ExceptT String IO a -> IO a
-liftError = runExceptT >=> either fail return
-
---TODO - make this error print "ERROR\n" etc
 compileModuleToLLVM :: AST.Module -> IO String
 compileModuleToLLVM mod = withContext $ \context ->
-  liftError $ withModuleFromAST context mod $ \m -> do
-    compiled <- moduleLLVMAssembly m
-    return compiled
+  Except.runExceptT >=> either (fail . ((++) "ERROR\n")) return $
+    withModuleFromAST context mod $ \m -> do
+      compiled <- moduleLLVMAssembly m
+      return compiled
 
 compileCProgram' :: String -> CProgram -> CompilerType AST.Module
 compileCProgram' name prog@(CProgram topdefs) = do
@@ -482,11 +478,15 @@ compileCStmt x = case x of
     setCurrentBlock falseLabel
     compileCStmt stmt2
     afterFalse <- getCurrentBlock
-    afterIfLabel <- newBlock
-    setUnBlockTerminator afterTrue (Do $ Br afterIfLabel [])
-    setUnBlockTerminator afterFalse (Do $ Br afterIfLabel [])
     setUnBlockTerminator afterCondLabel (Do $ CondBr val trueLabel falseLabel [])
-    setCurrentBlock afterIfLabel
+    termAfterTrue <- isBlockTerminated afterTrue
+    termAfterFalse <- isBlockTerminated afterFalse
+    Cond.when (not $ termAfterTrue && termAfterFalse) (do
+      afterIfLabel <- newBlock
+      setUnBlockTerminator afterTrue (Do $ Br afterIfLabel [])
+      setUnBlockTerminator afterFalse (Do $ Br afterIfLabel [])
+      setCurrentBlock afterIfLabel
+      )
     return ()
   CSWhile expr stmt -> do
     condLabel <- newBlock
@@ -514,8 +514,8 @@ binOprs = Map.fromList [
   ("*", AST.Mul False False),
   ("/", AST.SDiv False),
   ("%", AST.SRem),
-  ("||", AST.And),
-  ("&&", AST.Or),
+  ("||", AST.Or),
+  ("&&", AST.And),
   ("^", AST.Xor)
   ]
 
@@ -541,8 +541,28 @@ compileCBinOpr expr1 expr2 binOp retT = do
   cretT <- compileType retT
   let binOpF = (binOprs Map.! binOp)
   oper1 <- compileCExpr expr1
-  oper2 <- compileCExpr expr2
-  ref <- getNewLocalName
-  let ass = ref := binOpF oper1 oper2 []
-  addInstrsToCurrentBlock [ass]
-  return $ LocalReference cretT ref
+  case () of
+    _ | binOp == "&&" || binOp == "||" -> do
+    --TODO uzyc phi
+        sol <- alloc cretT
+        store sol oper1
+        afterFirstExp <- getCurrentBlock
+        continueCompLabel <- newBlock
+        setCurrentBlock continueCompLabel
+        oper2 <- compileCExpr expr2
+        store sol oper2
+        afterContinueCompLabel <- getCurrentBlock
+        afterBinOpLabel <- newBlock
+        setCurrentBlock afterBinOpLabel
+        solLoad <- load sol
+        if binOp == "&&"
+          then setUnBlockTerminator afterFirstExp (Do $ CondBr oper1 continueCompLabel afterBinOpLabel [])
+          else setUnBlockTerminator afterFirstExp (Do $ CondBr oper1 afterBinOpLabel continueCompLabel [])
+        setUnBlockTerminator afterContinueCompLabel (Do $ Br afterBinOpLabel [])
+        return solLoad
+      | True -> do
+        oper2 <- compileCExpr expr2
+        ref <- getNewLocalName
+        let ass = ref := binOpF oper1 oper2 []
+        addInstrsToCurrentBlock [ass]
+        return $ LocalReference cretT ref
