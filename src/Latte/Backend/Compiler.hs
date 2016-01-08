@@ -398,9 +398,9 @@ br name = Do $ Br name []
 condbr :: AST.Operand -> AST.Name -> AST.Name -> AST.Named AST.Terminator
 condbr cond trueLabel falseLabel =  Do $ CondBr cond trueLabel falseLabel []
 
-compileModuleToLLVM :: AST.Module -> IO String
+compileModuleToLLVM :: AST.Module -> IO (Err String)
 compileModuleToLLVM mod = withContext $ \context ->
-  Except.runExceptT >=> either (fail . ((++) "ERROR\n")) return $
+  Except.runExceptT >=> either (return . Bad) (return . Ok) $
     withModuleFromAST context mod $ \m -> do
       compiled <- moduleLLVMAssembly m
       return compiled

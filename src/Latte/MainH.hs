@@ -9,6 +9,7 @@ import Control.Monad
 import System.Environment
 import System.FilePath
 import System.IO
+import System.Exit
 
 fileExtension = ".lat"
 
@@ -31,8 +32,8 @@ compileToAssemblerFile compiler filePath extension = do
         writeFile outputFile compiled
       Bad m -> do
         hPutStrLn stderr ("ERROR\n" ++ m)
-        fail ""
-    )
+        exitFailure
+        )
   return outputFile
 
 compile :: (String -> Program -> IO (Err String)) -> String -> String -> IO (Err String)
@@ -51,3 +52,4 @@ mainH compiler extension generateObjectCode = do
   assemblerPath <- compileToAssemblerFile compiler filePath extension
   putStrLn $ "Generated: " ++ assemblerPath
   generateObjectCode assemblerPath
+  exitSuccess

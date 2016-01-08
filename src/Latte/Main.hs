@@ -31,7 +31,7 @@ compileProg' name prog = do
 compileProg :: String -> Program -> IO (Err String)
 compileProg name prog =
   case (fmap compileModuleToLLVM (compileProg' name prog)) of
-    Ok io -> fmap Ok io
+    Ok io -> io
     Bad m -> return $ Bad m
 
 compileLLFile :: String -> IO ()
