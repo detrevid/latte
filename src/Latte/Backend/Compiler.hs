@@ -11,16 +11,16 @@ import Latte.Internal.ASTInternal
 import Latte.Frontend.TypeChecker
 
 import LLVM.General.AST
+import qualified LLVM.General.AST as AST
 import qualified LLVM.General.AST.Instruction as Instruction
 import LLVM.General.AST.AddrSpace
 import qualified LLVM.General.AST.CallingConvention as CallConv
+import LLVM.General.AST.Constant
 import LLVM.General.AST.Global
 import qualified  LLVM.General.AST.Global as AST.Global
 import LLVM.General.AST.Linkage
 import qualified LLVM.General.AST.IntegerPredicate as IntPred
 import LLVM.General.AST.Type
-import qualified LLVM.General.AST as AST
-import LLVM.General.AST.Constant
 import LLVM.General.Context
 import LLVM.General.Module
 
@@ -85,15 +85,48 @@ resetCompilerState = CompilerType $ modify $ (\s -> defaultCompilerState {
   supplierStr = supplierStr s
   })
 
+putEnv :: CompilerEnv -> CompilerType ()
+putEnv env = CompilerType $ modify $ \s -> s { environment = env }
+
+getEnv :: CompilerType CompilerEnv
+getEnv = CompilerType $ gets environment
+
+addToEnv :: AST.Name -> AST.Operand -> CompilerType ()
+addToEnv ident t = CompilerType $ modify $ (\s -> s { environment = Map.insert ident t (environment s) })
+
+removeFromEnv :: AST.Name -> CompilerType ()
+removeFromEnv ident = CompilerType $ modify $ (\s -> s { environment = Map.delete ident (environment s) })
+
+lookupEnv :: AST.Name -> CompilerType AST.Operand
+lookupEnv ident = do
+  env <- getEnv
+  maybe (fail internalErrMsg) (return . id) (Map.lookup ident env)
+
+addNextBlock :: Name -> CompilerType ()
+addNextBlock name = CompilerType $ modify (\s -> s { blocks = (blocks s) ++ [name] })
+
+getBlock :: AST.Name -> CompilerType BasicBlockInfo
+getBlock name = do
+  benv <- CompilerType $ gets blocksEnv
+  maybe (fail internalErrMsg) (return . id) $ Map.lookup name benv
+
+newBlock :: CompilerType AST.Name
+newBlock = do
+  name <- getNewLabel
+  addNextBlock name
+  let newBlock = defaultBasicBlockInfo { blockName = name }
+  CompilerType $ modify (\s -> s { blocksEnv = Map.insert name newBlock (blocksEnv s) })
+  return name
+
 addInstrsToBlock :: AST.Name -> [AST.Named AST.Instruction] -> CompilerType ()
 addInstrsToBlock name instrs = do
   CompilerType $ modify (\s -> s { blocksEnv =
     (Map.update (\x -> Just ((flip addInstrs) instrs x)) name (blocksEnv s))})
 
-addInstrsToCurrentBlock :: [AST.Named AST.Instruction] -> CompilerType ()
-addInstrsToCurrentBlock instrs = do
-  current <- getCurrentBlock
-  addInstrsToBlock current instrs
+isBlockTerminated :: AST.Name -> CompilerType Bool
+isBlockTerminated name = do
+  block <- getBlock name
+  return $ not $ isNothing $ blockTerminator block
 
 setBlockTerminator :: AST.Name -> AST.Named AST.Terminator -> CompilerType ()
 setBlockTerminator name term = do
@@ -108,45 +141,11 @@ setUnBlockTerminator name term = do
       (Map.update (\x -> Just (x { blockTerminator = Just term })) name (blocksEnv s)) })
     else return ()
 
-setCurrentBlockTerminator :: AST.Named AST.Terminator -> CompilerType ()
-setCurrentBlockTerminator term = do
-  current <- getCurrentBlock
-  setBlockTerminator current term
-
-newBlock :: CompilerType AST.Name
-newBlock = do
-  name <- getNewLabel
-  addNextBlock name
-  let newBlock = defaultBasicBlockInfo { blockName = name }
-  CompilerType $ modify (\s -> s { blocksEnv = Map.insert name newBlock (blocksEnv s) })
-  return name
-
-newCurrentBlock :: CompilerType AST.Name
-newCurrentBlock = do
-  name <- newBlock
-  setCurrentBlock name
-  return name
-
-getBlock :: AST.Name -> CompilerType BasicBlockInfo
-getBlock name = do
-  benv <- CompilerType $ gets blocksEnv
-  maybe (fail internalErrMsg) (return . id) $ Map.lookup name benv
-
-isBlockTerminated :: AST.Name -> CompilerType Bool
-isBlockTerminated name = do
-  block <- getBlock name
-  return $ not $ isNothing $ blockTerminator block
-
 setCurrentBlock :: Name -> CompilerType ()
 setCurrentBlock name = CompilerType $ modify (\s -> s { currentBlock = name })
 
 getCurrentBlock :: CompilerType Name
 getCurrentBlock = CompilerType $ gets currentBlock
-
-isCurrentBlockTerminated :: CompilerType Bool
-isCurrentBlockTerminated = do
-  currentBlock <- getCurrentBlock
-  isBlockTerminated currentBlock
 
 removeCurrentBlock :: CompilerType ()
 removeCurrentBlock = do
@@ -155,8 +154,26 @@ removeCurrentBlock = do
     blocksEnv = Map.delete currentBlock (blocksEnv s),
     blocks = delete currentBlock (blocks s)})
 
-addNextBlock :: Name -> CompilerType ()
-addNextBlock name = CompilerType $ modify (\s -> s { blocks = (blocks s) ++ [name] })
+newCurrentBlock :: CompilerType AST.Name
+newCurrentBlock = do
+  name <- newBlock
+  setCurrentBlock name
+  return name
+
+addInstrsToCurrentBlock :: [AST.Named AST.Instruction] -> CompilerType ()
+addInstrsToCurrentBlock instrs = do
+  current <- getCurrentBlock
+  addInstrsToBlock current instrs
+
+setCurrentBlockTerminator :: AST.Named AST.Terminator -> CompilerType ()
+setCurrentBlockTerminator term = do
+  current <- getCurrentBlock
+  setBlockTerminator current term
+
+isCurrentBlockTerminated :: CompilerType Bool
+isCurrentBlockTerminated = do
+  currentBlock <- getCurrentBlock
+  isBlockTerminated currentBlock
 
 getBasicBlocks :: CompilerType [AST.BasicBlock]
 getBasicBlocks = do
@@ -164,12 +181,6 @@ getBasicBlocks = do
   mapM (\b -> do
     bbi <- getBlock b
     compileBasicBlockInfo bbi) bl
-
-putEnv :: CompilerEnv -> CompilerType ()
-putEnv env = CompilerType $ modify $ \s -> s { environment = env }
-
-getEnv :: CompilerType CompilerEnv
-getEnv = CompilerType $ gets environment
 
 endOfStringSign = "\00"
 
@@ -192,19 +203,8 @@ getStrConstDefs = do
   strConstEnv <- CompilerType $ gets stringConsts
   return $ map (\(str, name) -> globalStringConst name str) (Map.toList strConstEnv)
 
-addToEnv :: AST.Name -> AST.Operand -> CompilerType ()
-addToEnv ident t = CompilerType $ modify $ (\s -> s { environment = Map.insert ident t (environment s) })
-
-removeFromEnv :: AST.Name -> CompilerType ()
-removeFromEnv ident = CompilerType $ modify $ (\s -> s { environment = Map.delete ident (environment s) })
-
-lookupEnv :: AST.Name -> CompilerType AST.Operand
-lookupEnv ident = do
-  env <- getEnv
-  maybe (fail internalErrMsg) (return . id) (Map.lookup ident env)
-
-getRetType :: String -> CompilerType AST.Type
-getRetType ident = do
+getFunRetType :: String -> CompilerType AST.Type
+getFunRetType ident = do
   tenv <- CompilerType $ gets glFunTypeEnv
   case (Map.lookup ident tenv) of
     Just (TFun rType _, _, _)  -> compileType rType
@@ -271,6 +271,15 @@ data BasicBlockInfo = BasicBlockInfo {
 defaultBasicBlockInfo :: BasicBlockInfo
 defaultBasicBlockInfo = BasicBlockInfo { blockName = error "Unnamed block", blockBody = [], blockTerminator = Nothing }
 
+addInstrs :: BasicBlockInfo -> [AST.Named AST.Instruction] -> BasicBlockInfo
+addInstrs bb instrs = bb { blockBody = (blockBody bb) ++ instrs }
+
+compileBasicBlockInfo :: BasicBlockInfo -> CompilerType AST.BasicBlock
+compileBasicBlockInfo bbi =
+  case (blockTerminator bbi) of
+    Just terminator -> return $ BasicBlock (blockName bbi) (blockBody bbi) terminator
+    Nothing -> fail internalErrMsg
+
 funDeclForBuiltIns' :: ABS.Type -> String -> [(ABS.Type, String)] -> CompilerType AST.Definition
 funDeclForBuiltIns' rType name args = do
   rType' <- compileType rType
@@ -283,15 +292,6 @@ funDeclForBuiltIns' rType name args = do
 
 funDeclForBuiltIns :: CompilerType [AST.Definition]
 funDeclForBuiltIns = mapM (\(t, n, a) -> funDeclForBuiltIns' t n a) builtInsDescs
-
-compileBasicBlockInfo :: BasicBlockInfo -> CompilerType AST.BasicBlock
-compileBasicBlockInfo bbi =
-  case (blockTerminator bbi) of
-    Just terminator -> return $ BasicBlock (blockName bbi) (blockBody bbi) terminator
-    Nothing -> fail internalErrMsg
-
-addInstrs :: BasicBlockInfo -> [AST.Named AST.Instruction] -> BasicBlockInfo
-addInstrs bb instrs = bb { blockBody = (blockBody bb) ++ instrs }
 
 defaultAddrSpace = AddrSpace 0
 
@@ -348,25 +348,6 @@ globalStringConst name s =
     initializer  = Just $ Array charType (map getCharConst s)
     }
 
-compileModuleToLLVM :: AST.Module -> IO String
-compileModuleToLLVM mod = withContext $ \context ->
-  Except.runExceptT >=> either (fail . ((++) "ERROR\n")) return $
-    withModuleFromAST context mod $ \m -> do
-      compiled <- moduleLLVMAssembly m
-      return compiled
-
-compileCProgram' :: String -> CProgram -> CompilerType AST.Module
-compileCProgram' name prog@(CProgram topdefs) = do
-  CompilerType $ modify (\s -> s { glFunTypeEnv = getGlobalCDefsTypesEnv prog })
-  decls <- funDeclForBuiltIns
-  defs <- mapM compileCTopDef topdefs
-  strConstDefs <- getStrConstDefs
-  let strDefault = globalStringConst (Name ".str_default") ""
-  return $ newModule name ([strDefault] ++ strConstDefs ++ decls ++ defs)
-
-compileCProgram :: String -> CProgram -> Err AST.Module
-compileCProgram name prog = runCompilerType $ compileCProgram' name prog
-
 nameInstruction :: AST.Type -> AST.Instruction -> CompilerType AST.Operand
 nameInstruction t inst = do
   ref <- getNewLocalName
@@ -403,10 +384,38 @@ allocAndStore t name oper = do
 
 call :: String -> [CTExpr] -> CompilerType AST.Operand
 call name args = do
-  retType <- getRetType name
+  retType <- getFunRetType name
   compiledArgs <- mapM compileCExpr args
   nameInstruction (pointerReferent intType) $ Call Nothing CallConv.C [] (Right $ ConstantOperand $
     GlobalReference retType (Name name)) (map (\arg -> (arg, [])) compiledArgs) [] []
+
+ret :: Maybe AST.Operand -> AST.Named AST.Terminator
+ret mval = Do $ Ret { returnOperand = mval, metadata' = [] }
+
+br :: AST.Name -> AST.Named AST.Terminator
+br name = Do $ Br name []
+
+condbr :: AST.Operand -> AST.Name -> AST.Name -> AST.Named AST.Terminator
+condbr cond trueLabel falseLabel =  Do $ CondBr cond trueLabel falseLabel []
+
+compileModuleToLLVM :: AST.Module -> IO String
+compileModuleToLLVM mod = withContext $ \context ->
+  Except.runExceptT >=> either (fail . ((++) "ERROR\n")) return $
+    withModuleFromAST context mod $ \m -> do
+      compiled <- moduleLLVMAssembly m
+      return compiled
+
+compileCProgram :: String -> CProgram -> Err AST.Module
+compileCProgram name prog = runCompilerType $ compileCProgram' name prog
+
+compileCProgram' :: String -> CProgram -> CompilerType AST.Module
+compileCProgram' name prog@(CProgram topdefs) = do
+  CompilerType $ modify (\s -> s { glFunTypeEnv = getGlobalCDefsTypesEnv prog })
+  decls <- funDeclForBuiltIns
+  defs <- mapM compileCTopDef topdefs
+  strConstDefs <- getStrConstDefs
+  let strDefault = globalStringConst (Name ".str_default") ""
+  return $ newModule name ([strDefault] ++ strConstDefs ++ decls ++ defs)
 
 compileCTopDef :: CTopDef -> CompilerType AST.Definition
 compileCTopDef x = case x of
@@ -430,15 +439,6 @@ compileCBlock (CBlock stmts) = do
   oldEnv <- getEnv
   mapM_ (\stmt -> unlessM (isCurrentBlockTerminated) (compileCStmt stmt)) stmts
   putEnv oldEnv
-
-ret :: Maybe AST.Operand -> AST.Named AST.Terminator
-ret mval = Do $ Ret { returnOperand = mval, metadata' = [] }
-
-br :: AST.Name -> AST.Named AST.Terminator
-br name = Do $ Br name []
-
-condbr :: AST.Operand -> AST.Name -> AST.Name -> AST.Named AST.Terminator
-condbr cond trueLabel falseLabel =  Do $ CondBr cond trueLabel falseLabel []
 
 compileCStmt :: CStmt -> CompilerType ()
 compileCStmt x = case x of
@@ -499,6 +499,16 @@ compileCStmt x = case x of
     afterRepeatBodyLabel <- getCurrentBlock
     setUnBlockTerminator afterRepeatBodyLabel $ br repeatBodyLabel
 
+compileCExpr :: CTExpr -> CompilerType AST.Operand
+compileCExpr (x, tx) = case x of
+  CELit lit -> case lit of
+    CLInt val    -> return $ getIntConstOper val
+    CLBool val   -> return $ getBoolConstOper val
+    CLString str -> refToStringConst str
+  CEApp ident args -> call ident args
+  CEVar ident -> loadVar ident
+  CBinOp expr1 opr expr2 -> compileCBinOpr expr1 expr2 opr tx
+
 binOprs = Map.fromList [
   ("<", AST.ICmp IntPred.SLT),
   ("<=", AST.ICmp IntPred.SLE),
@@ -515,16 +525,6 @@ binOprs = Map.fromList [
   ("&&", AST.And),
   ("^", AST.Xor)
   ]
-
-compileCExpr :: CTExpr -> CompilerType AST.Operand
-compileCExpr (x, tx) = case x of
-  CELit lit -> case lit of
-    CLInt val    -> return $ getIntConstOper val
-    CLBool val   -> return $ getBoolConstOper val
-    CLString str -> refToStringConst str
-  CEApp ident args -> call ident args
-  CEVar ident -> loadVar ident
-  CBinOp expr1 opr expr2 -> compileCBinOpr expr1 expr2 opr tx
 
 compileCBinOpr :: CTExpr -> CTExpr -> String -> ABS.Type -> CompilerType AST.Operand
 compileCBinOpr expr1 expr2 binOp retT = do
