@@ -320,14 +320,15 @@ getCharConst c = Int charBits $ fromIntegral $ ord c
 getCharConstOper :: Char -> Operand
 getCharConstOper c = ConstantOperand $ getCharConst c
 
+defaultIntVal = getIntConstOper 0
+defaultBoolVal = getBoolConstOper False
+
 defaultValue :: ABS.Type -> CompilerType AST.Operand
 defaultValue x = case x of
-  TType (TBuiltIn BIInt) -> return $ getIntConstOper 0
+  TType (TBuiltIn BIInt) -> return $ defaultIntVal
   TType (TBuiltIn BIVoid) -> fail $  internalErrMsg
-  TType (TBuiltIn BIBool) -> return $ getBoolConstOper False
-  TType (TBuiltIn BIStr) ->
-    nameInstruction stringType $ Instruction.GetElementPtr True (ConstantOperand $
-      GlobalReference (constStringType 0) (Name ".str_default")) [getIntConstOper 0, getIntConstOper 0] []
+  TType (TBuiltIn BIBool) -> return $ defaultBoolVal
+  TType (TBuiltIn BIStr) -> refToStringConst ""
   _ -> fail internalErrMsg
 
 globalStringConst :: Name -> String -> Definition
@@ -407,8 +408,7 @@ compileCProgram' name prog@(CProgram topdefs) = do
   decls <- funDeclForBuiltIns
   defs <- mapM compileCTopDef topdefs
   strConstDefs <- getStrConstDefs
-  let strDefault = globalStringConst (Name ".str_default") ""
-  return $ newModule name ([strDefault] ++ strConstDefs ++ decls ++ defs)
+  return $ newModule name (strConstDefs ++ decls ++ defs)
 
 compileCTopDef :: CTopDef -> CompilerType AST.Definition
 compileCTopDef x = case x of
