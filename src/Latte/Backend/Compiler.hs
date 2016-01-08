@@ -147,13 +147,6 @@ setCurrentBlock name = CompilerType $ modify (\s -> s { currentBlock = name })
 getCurrentBlock :: CompilerType Name
 getCurrentBlock = CompilerType $ gets currentBlock
 
-removeCurrentBlock :: CompilerType ()
-removeCurrentBlock = do
-  currentBlock <- getCurrentBlock
-  CompilerType $ modify (\s -> s {
-    blocksEnv = Map.delete currentBlock (blocksEnv s),
-    blocks = delete currentBlock (blocks s)})
-
 newCurrentBlock :: CompilerType AST.Name
 newCurrentBlock = do
   name <- newBlock
@@ -430,7 +423,6 @@ compileCTopDef x = case x of
       return $ Parameter atype' aname []) args
     mapM_ (\(Parameter atype aname _) -> allocAndStore atype aname (LocalReference atype aname)) params
     compileCBlock block
-    unlessM (isCurrentBlockTerminated) removeCurrentBlock
     bblocks <- getBasicBlocks
     return $ newGlobalFunctionDef tret' name params bblocks
 
@@ -442,13 +434,13 @@ compileCBlock (CBlock stmts) = do
 
 compileCStmt :: CStmt -> CompilerType ()
 compileCStmt x = case x of
-  CSEmpty               -> return ()
+  CSEmpty -> return ()
   CSBlock block -> compileCBlock block
-  CSExp expr            -> compileCExpr expr >> return ()
-  CSRet expr          -> do
+  CSExp expr -> compileCExpr expr >> return ()
+  CSRet expr -> do
     val <- compileCExpr expr
     setCurrentBlockTerminator $ ret $ Just val
-  CSVRet              -> setCurrentBlockTerminator $ ret Nothing
+  CSVRet -> setCurrentBlockTerminator $ ret Nothing
   CSDecl t items -> do
     t' <- compileType t
     mapM_ (\item -> case item of
