@@ -12,50 +12,65 @@ import qualified Control.Monad.Trans.State as StateT
 binpos = (-1,-1)
 bidepth = 0
 
-printIntName = "printInt"
-printIntRetType = typeVoid
-printIntArgs = [(typeInt, "x")]
-printIntInfo = (TFun printIntRetType [typeInt], binpos, bidepth)
-printIntDesc = (printIntRetType, printIntName, printIntArgs)
+data FunctionInfo = FunctionInfo {
+  functionName       :: String,
+  functionReturnType :: Type,
+  functionArguments  :: [(Type, String)]
+  } deriving (Show)
 
-printStringName = "printString"
-printStringRetType = typeVoid
-printStringArgs = [(typeString, "s")]
-printStringInfo = (TFun printStringRetType [typeString], binpos, bidepth)
-printStringDesc = (printStringRetType, printStringName, printStringArgs)
+getArgsTypesFI :: FunctionInfo -> [Type]
+getArgsTypesFI fi = map fst (functionArguments fi)
 
-errorName = "error"
-errorRetType = typeVoid
-errorArgs = []
-errorInfo = (TFun errorRetType [], binpos, bidepth)
-errorDesc = (errorRetType, errorName, errorArgs)
+getFunTypeFI :: FunctionInfo -> Type
+getFunTypeFI fi = TFun (functionReturnType fi) (getArgsTypesFI fi)
 
-readIntName = "readInt"
-readIntRetType = typeInt
-readIntArgs = []
-readIntInfo = (TFun readIntRetType [], binpos, bidepth)
-readIntDesc = (readIntRetType, readIntName, readIntArgs)
+getFunDescFI :: FunctionInfo -> (Type, String, [(Type, String)])
+getFunDescFI fi = (functionReturnType fi, functionName fi, functionArguments fi)
 
-readStringName = "readString"
-readStringRetType = typeString
-readStringArgs = []
-readStringInfo = (TFun readStringRetType [], binpos, bidepth)
-readStringDesc = (readStringRetType, readStringName, readStringArgs)
+getBinFunTypeInfo :: FunctionInfo -> (String, TypeInfo)
+getBinFunTypeInfo fi = (functionName fi, ((getFunTypeFI fi), binpos, bidepth))
 
-concatStringName = "concatString"
-concatStringRetType = typeString
-concatStringArgs = [(typeString, "str1"), (typeString, "str2")]
-concatStringInfo = (TFun readStringRetType [typeString, typeString], binpos, bidepth)
-concatStringDesc = (concatStringRetType, concatStringName, concatStringArgs)
+printIntFI = FunctionInfo {
+  functionName       = "printInt",
+  functionReturnType = typeVoid,
+  functionArguments  = [(typeInt, "x")]
+}
 
-builtInsTypes = Map.fromList [(printIntName, printIntInfo),
-                              (printStringName, printStringInfo),
-                              (errorName, errorInfo),
-                              (readIntName, readIntInfo),
-                              (readStringName, readStringInfo),
-                              (concatStringName, concatStringInfo)]
+printStringFI = FunctionInfo {
+  functionName       = "printString",
+  functionReturnType = typeVoid,
+  functionArguments  = [(typeString, "s")]
+}
 
-builtInsDescs = [printIntDesc, printStringDesc, errorDesc, readIntDesc, readStringDesc, concatStringDesc]
+errorFI = FunctionInfo {
+  functionName       = "error",
+  functionReturnType = typeVoid,
+  functionArguments  = []
+}
+
+readIntFI = FunctionInfo {
+  functionName       = "readInt",
+  functionReturnType = typeInt,
+  functionArguments  = []
+}
+
+readStringFI = FunctionInfo {
+  functionName       = "readString",
+  functionReturnType = typeString,
+  functionArguments  = []
+}
+
+concatStringFI = FunctionInfo {
+  functionName       = "concatString",
+  functionReturnType = typeString,
+  functionArguments  = [(typeString, "str1"), (typeString, "str2")]
+}
+
+builtIns = [printIntFI,  printStringFI, errorFI, readIntFI, readStringFI, concatStringFI]
+
+builtInsTypeInfos = map getBinFunTypeInfo builtIns
+
+builtInsDescs = map getFunDescFI builtIns
 
 addBuiltInsToTypeEnv :: TypeEnv -> TypeEnv
-addBuiltInsToTypeEnv = flip Map.union builtInsTypes
+addBuiltInsToTypeEnv = flip Map.union $ Map.fromList builtInsTypeInfos

@@ -121,10 +121,16 @@ newBlock = do
   CompilerType $ modify (\s -> s { blocksEnv = Map.insert name newBlock (blocksEnv s) })
   return name
 
+newCurrentBlock :: CompilerType AST.Name
+newCurrentBlock = do
+  name <- newBlock
+  setCurrentBlock name
+  return name
+
 getBlock :: AST.Name -> CompilerType BasicBlockInfo
 getBlock name = do
   benv <- CompilerType $ gets blocksEnv
-  maybe (fail $ internalErrMsg ++ " getBlock") (return . id) $ Map.lookup name benv
+  maybe (fail internalErrMsg) (return . id) $ Map.lookup name benv
 
 isBlockTerminated :: AST.Name -> CompilerType Bool
 isBlockTerminated name = do
@@ -174,21 +180,12 @@ addStringConst str = do
   CompilerType $ modify $ (\s -> s { stringConsts = Map.insert str' name (stringConsts s) })
   return name
 
-getRefToStringConst :: String -> CompilerType ([AST.Named AST.Instruction], AST.Operand)
-getRefToStringConst str = do
+refToStringConst :: String -> CompilerType AST.Operand
+refToStringConst str = do
   strConstEnv <- CompilerType $ gets stringConsts
-  case (Map.lookup (str ++ endOfStringSign) strConstEnv) of
-    Nothing -> do
-      name <- addStringConst str
-      ref <- getNewLocalName
-      let getPtr = ref := Instruction.GetElementPtr True (ConstantOperand $
-               GlobalReference (constStringType (length str)) name) [getIntConstOper 0, getIntConstOper 0] []
-      return ([getPtr], LocalReference stringType ref)
-    Just name -> do
-      ref <- getNewLocalName
-      let getPtr = ref := Instruction.GetElementPtr True (ConstantOperand $
-                     GlobalReference (constStringType (length str)) name) [getIntConstOper 0, getIntConstOper 0] []
-      return ([getPtr], LocalReference stringType ref)
+  name <- maybe (addStringConst str) (return . id) (Map.lookup (str ++ endOfStringSign) strConstEnv)
+  nameInstruction stringType $ Instruction.GetElementPtr True (ConstantOperand $
+                        GlobalReference (constStringType (length str)) name) [getIntConstOper 0, getIntConstOper 0] []
 
 getStrConstDefs :: CompilerType [AST.Definition]
 getStrConstDefs = do
@@ -210,10 +207,8 @@ getRetType :: String -> CompilerType AST.Type
 getRetType ident = do
   tenv <- CompilerType $ gets glFunTypeEnv
   case (Map.lookup ident tenv) of
-    Just (t, _, _)  -> case t of
-      TFun rType _ -> compileType rType
-      _ -> fail $ internalErrMsg ++ "Just getRetType"
-    Nothing -> fail $ internalErrMsg ++ "Nothing getRetType"
+    Just (TFun rType _, _, _)  -> compileType rType
+    Nothing -> fail internalErrMsg
 
 getNewNr' :: CompilerState -> (Int, CompilerState)
 getNewNr' s =
@@ -293,7 +288,7 @@ compileBasicBlockInfo :: BasicBlockInfo -> CompilerType AST.BasicBlock
 compileBasicBlockInfo bbi =
   case (blockTerminator bbi) of
     Just terminator -> return $ BasicBlock (blockName bbi) (blockBody bbi) terminator
-    Nothing -> fail $ internalErrMsg ++ " compileBasicBlockInfo"
+    Nothing -> fail internalErrMsg
 
 addInstrs :: BasicBlockInfo -> [AST.Named AST.Instruction] -> BasicBlockInfo
 addInstrs bb instrs = bb { blockBody = (blockBody bb) ++ instrs }
@@ -316,7 +311,7 @@ compileType x = case x of
   TType (TBuiltIn BIVoid) -> return VoidType
   TType (TBuiltIn BIBool) -> return boolType
   TType (TBuiltIn BIStr) -> return stringType
-  _ -> fail $ internalErrMsg ++ " compileType"
+  _ -> fail internalErrMsg
 
 getIntConstOper :: Integer -> Operand
 getIntConstOper val = ConstantOperand $ Int { integerBits = intBits, integerValue = val }
@@ -335,21 +330,19 @@ getCharConstOper c = ConstantOperand $ getCharConst c
 defaultValue :: ABS.Type -> CompilerType AST.Operand
 defaultValue x = case x of
   TType (TBuiltIn BIInt) -> return $ getIntConstOper 0
-  TType (TBuiltIn BIVoid) -> fail $  internalErrMsg ++ " defaultValue"
+  TType (TBuiltIn BIVoid) -> fail $  internalErrMsg
   TType (TBuiltIn BIBool) -> return $ getBoolConstOper False
-  TType (TBuiltIn BIStr) -> do
-    ref <- getNewLocalName
-    addInstrsToCurrentBlock [ref := Instruction.GetElementPtr True (ConstantOperand $
-      GlobalReference (constStringType 0) (Name ".str_default")) [getIntConstOper 0, getIntConstOper 0] []]
-    return $ LocalReference stringType ref
-  _ -> fail $ internalErrMsg ++ " defaultValue"
+  TType (TBuiltIn BIStr) ->
+    nameInstruction stringType $ Instruction.GetElementPtr True (ConstantOperand $
+      GlobalReference (constStringType 0) (Name ".str_default")) [getIntConstOper 0, getIntConstOper 0] []
+  _ -> fail internalErrMsg
 
 globalStringConst :: Name -> String -> Definition
 globalStringConst name s =
   GlobalDefinition $ globalVariableDefaults {
     name = name,
-    linkage = Private, --TODO should it be here
-    hasUnnamedAddr = True, --TODO should it be here
+    linkage = Private,
+    hasUnnamedAddr = True,
     isConstant = True,
     AST.Global.type' = constStringType $ length s,
     initializer  = Just $ Array charType (map getCharConst s)
@@ -374,6 +367,12 @@ compileCProgram' name prog@(CProgram topdefs) = do
 compileCProgram :: String -> CProgram -> Err AST.Module
 compileCProgram name prog = runCompilerType $ compileCProgram' name prog
 
+nameInstruction :: AST.Type -> AST.Instruction -> CompilerType AST.Operand
+nameInstruction t inst = do
+  ref <- getNewLocalName
+  addInstrsToCurrentBlock [ref := inst]
+  return $ LocalReference t ref
+
 store :: AST.Operand -> AST.Operand -> CompilerType ()
 store address value = addInstrsToCurrentBlock [Do $ Store False address value Nothing 0 []]
 
@@ -383,19 +382,13 @@ storeVar ident value = do
   store oper value
 
 alloc :: AST.Type -> CompilerType AST.Operand
-alloc t = do
-  ref <- getNewLocalName
-  addInstrsToCurrentBlock [ref := Alloca t Nothing 0 []]
-  return $ LocalReference (PointerType t defaultAddrSpace) ref
+alloc t = nameInstruction (PointerType t defaultAddrSpace) $ Alloca t Nothing 0 []
 
 load :: AST.Operand -> CompilerType AST.Operand
 load op = case op of
-  LocalReference t name -> do
-    ref <- getNewLocalName
-    addInstrsToCurrentBlock [ref := Load False op Nothing 0 []]
-    return $ LocalReference (pointerReferent t) ref
-  _ -> fail $ internalErrMsg ++ " load"
---TODO - pointerReferent t - monie miec tego pola jezeli to nie jest PointerType
+  LocalReference (PointerType pref _) name ->
+    nameInstruction pref $ Load False op Nothing 0 []
+  _ -> fail internalErrMsg
 
 loadVar :: String -> CompilerType AST.Operand
 loadVar ident = do
@@ -407,22 +400,19 @@ allocAndStore t name oper = do
   op <- alloc t
   store op oper
   addToEnv name op
-  return ()
 
-callC :: AST.Name -> AST.Type -> [CTExpr] -> CompilerType AST.Operand
-callC name retType args = do
+call :: String -> [CTExpr] -> CompilerType AST.Operand
+call name args = do
+  retType <- getRetType name
   compiledArgs <- mapM compileCExpr args
-  ref <- getNewLocalName
-  addInstrsToCurrentBlock [ref := Call Nothing CallConv.C [] (Right $ ConstantOperand $
-    GlobalReference retType name) (map (\arg -> (arg, [])) compiledArgs) [] []]
-  return $ LocalReference (pointerReferent intType) ref
+  nameInstruction (pointerReferent intType) $ Call Nothing CallConv.C [] (Right $ ConstantOperand $
+    GlobalReference retType (Name name)) (map (\arg -> (arg, [])) compiledArgs) [] []
 
 compileCTopDef :: CTopDef -> CompilerType AST.Definition
 compileCTopDef x = case x of
   CTDFnDef tret ident args block -> do
     resetCompilerState
-    entryLabel <- newBlock
-    setCurrentBlock entryLabel
+    entryLabel <- newCurrentBlock
     tret' <- compileType tret
     let name = Name ident
     params <- mapM (\(CArg atype aid) -> do
@@ -441,6 +431,15 @@ compileCBlock (CBlock stmts) = do
   mapM_ (\stmt -> unlessM (isCurrentBlockTerminated) (compileCStmt stmt)) stmts
   putEnv oldEnv
 
+ret :: Maybe AST.Operand -> AST.Named AST.Terminator
+ret mval = Do $ Ret { returnOperand = mval, metadata' = [] }
+
+br :: AST.Name -> AST.Named AST.Terminator
+br name = Do $ Br name []
+
+condbr :: AST.Operand -> AST.Name -> AST.Name -> AST.Named AST.Terminator
+condbr cond trueLabel falseLabel =  Do $ CondBr cond trueLabel falseLabel []
+
 compileCStmt :: CStmt -> CompilerType ()
 compileCStmt x = case x of
   CSEmpty               -> return ()
@@ -448,11 +447,8 @@ compileCStmt x = case x of
   CSExp expr            -> compileCExpr expr >> return ()
   CSRet expr          -> do
     val <- compileCExpr expr
-    setCurrentBlockTerminator $ Do $ Ret { returnOperand = Just val, metadata' = [] }
-    return ()
-  CSVRet              -> do
-    setCurrentBlockTerminator $ Do $ Ret { returnOperand = Nothing, metadata' = [] }
-    return ()
+    setCurrentBlockTerminator $ ret $ Just val
+  CSVRet              -> setCurrentBlockTerminator $ ret Nothing
   CSDecl t items -> do
     t' <- compileType t
     mapM_ (\item -> case item of
@@ -463,53 +459,45 @@ compileCStmt x = case x of
         val <- compileCExpr exp
         allocAndStore t' (Name ident) val
           ) items
-    return ()
   CSAss ident expr -> do
     val <- compileCExpr expr
     storeVar ident val
   CSCondElse expr stmt1 stmt2 -> do
     val <- compileCExpr expr
     afterCondLabel <- getCurrentBlock
-    trueLabel <- newBlock
-    setCurrentBlock trueLabel
+    trueLabel <- newCurrentBlock
     compileCStmt stmt1
     afterTrue <- getCurrentBlock
-    falseLabel <- newBlock
-    setCurrentBlock falseLabel
+    falseLabel <- newCurrentBlock
     compileCStmt stmt2
     afterFalse <- getCurrentBlock
-    setUnBlockTerminator afterCondLabel (Do $ CondBr val trueLabel falseLabel [])
+    setUnBlockTerminator afterCondLabel $ condbr val trueLabel falseLabel
     termAfterTrue <- isBlockTerminated afterTrue
     termAfterFalse <- isBlockTerminated afterFalse
     Cond.when (not $ termAfterTrue && termAfterFalse) (do
-      afterIfLabel <- newBlock
-      setUnBlockTerminator afterTrue (Do $ Br afterIfLabel [])
-      setUnBlockTerminator afterFalse (Do $ Br afterIfLabel [])
-      setCurrentBlock afterIfLabel
+      afterIfLabel <- newCurrentBlock
+      setUnBlockTerminator afterTrue $ br afterIfLabel
+      setUnBlockTerminator afterFalse $ br afterIfLabel
       )
     return ()
   CSWhile expr stmt -> do
     condLabel <- newBlock
-    setCurrentBlockTerminator $ Do $ Br condLabel []
+    setCurrentBlockTerminator $ br condLabel
     setCurrentBlock condLabel
     val <- compileCExpr expr
-    whileBodyLabel <- newBlock
-    setCurrentBlock whileBodyLabel
+    whileBodyLabel <- newCurrentBlock
     compileCStmt stmt
     afterWhileBodyLabel <- getCurrentBlock
-    afterWhileLabel <- newBlock
-    setUnBlockTerminator afterWhileBodyLabel $ Do $ Br condLabel []
-    setUnBlockTerminator condLabel $ Do $ CondBr val whileBodyLabel afterWhileLabel []
-    setCurrentBlock afterWhileLabel
-    return ()
+    afterWhileLabel <- newCurrentBlock
+    setUnBlockTerminator afterWhileBodyLabel $ br condLabel
+    setUnBlockTerminator condLabel $ condbr val whileBodyLabel afterWhileLabel
   CSRepeat stmt -> do
     repeatBodyLabel <- newBlock
-    setCurrentBlockTerminator $ Do $ Br repeatBodyLabel []
+    setCurrentBlockTerminator $ br repeatBodyLabel
     setCurrentBlock repeatBodyLabel
     compileCStmt stmt
     afterRepeatBodyLabel <- getCurrentBlock
-    setUnBlockTerminator afterRepeatBodyLabel $ Do $ Br repeatBodyLabel []
-    return ()
+    setUnBlockTerminator afterRepeatBodyLabel $ br repeatBodyLabel
 
 binOprs = Map.fromList [
   ("<", AST.ICmp IntPred.SLT),
@@ -533,14 +521,8 @@ compileCExpr (x, tx) = case x of
   CELit lit -> case lit of
     CLInt val    -> return $ getIntConstOper val
     CLBool val   -> return $ getBoolConstOper val
-    CLString str -> do
-      (instrs, oper) <- getRefToStringConst str
-      addInstrsToCurrentBlock instrs
-      return oper
-  CEApp ident args -> do
-    retType <- getRetType ident
-    oper <- callC (Name ident) retType args
-    return oper
+    CLString str -> refToStringConst str
+  CEApp ident args -> call ident args
   CEVar ident -> loadVar ident
   CBinOp expr1 opr expr2 -> compileCBinOpr expr1 expr2 opr tx
 
@@ -550,27 +532,21 @@ compileCBinOpr expr1 expr2 binOp retT = do
   let binOpF = (binOprs Map.! binOp)
   oper1 <- compileCExpr expr1
   case () of
-    _ | binOp == "&&" || binOp == "||" -> do
-    --TODO uzyc phi
+    _ | elem binOp logOps -> do
         sol <- alloc cretT
         store sol oper1
         afterFirstExp <- getCurrentBlock
-        continueCompLabel <- newBlock
-        setCurrentBlock continueCompLabel
+        continueCompLabel <- newCurrentBlock
         oper2 <- compileCExpr expr2
         store sol oper2
         afterContinueCompLabel <- getCurrentBlock
-        afterBinOpLabel <- newBlock
-        setCurrentBlock afterBinOpLabel
+        afterBinOpLabel <- newCurrentBlock
         solLoad <- load sol
-        if binOp == "&&"
-          then setUnBlockTerminator afterFirstExp (Do $ CondBr oper1 continueCompLabel afterBinOpLabel [])
-          else setUnBlockTerminator afterFirstExp (Do $ CondBr oper1 afterBinOpLabel continueCompLabel [])
-        setUnBlockTerminator afterContinueCompLabel (Do $ Br afterBinOpLabel [])
+        if binOp == logAndOp
+          then setUnBlockTerminator afterFirstExp $ condbr oper1 continueCompLabel afterBinOpLabel
+          else setUnBlockTerminator afterFirstExp $ condbr oper1 afterBinOpLabel continueCompLabel
+        setUnBlockTerminator afterContinueCompLabel (br afterBinOpLabel)
         return solLoad
       | True -> do
         oper2 <- compileCExpr expr2
-        ref <- getNewLocalName
-        let ass = ref := binOpF oper1 oper2 []
-        addInstrsToCurrentBlock [ass]
-        return $ LocalReference cretT ref
+        nameInstruction cretT $ binOpF oper1 oper2 []

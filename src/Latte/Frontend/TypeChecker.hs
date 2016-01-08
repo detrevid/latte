@@ -389,7 +389,7 @@ checkTypesExpr' x = case x of
           (texpr2, cexpr2) <- checkTypesExpr expr2
           cexprFolded <- constantFolding $ (CBinOp cexpr1 "+" cexpr2, t)
           case cexprFolded of
-            (CBinOp cexpr1 _ cexpr2, _) -> return (t, (CEApp concatStringName [cexpr1, cexpr2], t))
+            (CBinOp cexpr1 _ cexpr2, _) -> return (t, (CEApp (functionName concatStringFI) [cexpr1, cexpr2], t))
             (CELit _, _) -> return (t, cexprFolded)
             _ -> fail internalErrMsg
     OMinus (TMinus info) -> checkTypesBinOp info expr1 expr2 typeInt typeInt

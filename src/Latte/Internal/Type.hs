@@ -37,3 +37,7 @@ notOp = "!"
 
 eqOp = "=="
 neqOp = "!="
+
+logAndOp = "&&"
+logOrOp = "||"
+logOps = [logAndOp, logOrOp]
