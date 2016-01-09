@@ -215,7 +215,7 @@ getNewStrNr' s =
  where NumSupplier num = supplierStr s
 
 getNewStrNr :: CompilerType Int
-getNewStrNr = state getNewNr'
+getNewStrNr = state getNewStrNr'
 
 getNewStringConstName :: CompilerType Name
 getNewStringConstName = do
