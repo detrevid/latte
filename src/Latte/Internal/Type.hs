@@ -41,3 +41,5 @@ neqOp = "!="
 logAndOp = "&&"
 logOrOp = "||"
 logOps = [logAndOp, logOrOp]
+
+permittedVarTypes = [typeVoid]
