@@ -34,7 +34,6 @@ import Data.Maybe
 import Control.Applicative (Applicative)
 import Control.Monad.State
 import qualified Control.Monad.Except as Except
-import qualified Control.Monad.Trans.State as StateT
 
 internalErrMsg = "Internal error during llvm compiling phase"
 
@@ -72,11 +71,10 @@ defaultCompilerState = CompilerState {
   }
 
 newtype CompilerType a = CompilerType (StateT CompilerState Err a)
-  deriving (Functor, Applicative, Monad)
+  deriving (Functor, Applicative, Monad, MonadState CompilerState)
 
 runCompilerType :: CompilerType a -> Err a
-runCompilerType (CompilerType x) =
-  evalStateT x defaultCompilerState
+runCompilerType (CompilerType x) = evalStateT x defaultCompilerState
 
 resetCompilerState ::  CompilerType ()
 resetCompilerState = CompilerType $ modify $ (\s -> defaultCompilerState {
@@ -86,16 +84,16 @@ resetCompilerState = CompilerType $ modify $ (\s -> defaultCompilerState {
   })
 
 putEnv :: CompilerEnv -> CompilerType ()
-putEnv env = CompilerType $ modify $ \s -> s { environment = env }
+putEnv env = modify $ \s -> s { environment = env }
 
 getEnv :: CompilerType CompilerEnv
-getEnv = CompilerType $ gets environment
+getEnv = gets environment
 
 addToEnv :: AST.Name -> AST.Operand -> CompilerType ()
-addToEnv ident t = CompilerType $ modify $ (\s -> s { environment = Map.insert ident t (environment s) })
+addToEnv ident t = modify $ (\s -> s { environment = Map.insert ident t (environment s) })
 
 removeFromEnv :: AST.Name -> CompilerType ()
-removeFromEnv ident = CompilerType $ modify $ (\s -> s { environment = Map.delete ident (environment s) })
+removeFromEnv ident = modify $ (\s -> s { environment = Map.delete ident (environment s) })
 
 lookupEnv :: AST.Name -> CompilerType AST.Operand
 lookupEnv ident = do
@@ -103,11 +101,11 @@ lookupEnv ident = do
   maybe (fail internalErrMsg) (return . id) (Map.lookup ident env)
 
 addNextBlock :: Name -> CompilerType ()
-addNextBlock name = CompilerType $ modify (\s -> s { blocks = (blocks s) ++ [name] })
+addNextBlock name = modify (\s -> s { blocks = (blocks s) ++ [name] })
 
 getBlock :: AST.Name -> CompilerType BasicBlockInfo
 getBlock name = do
-  benv <- CompilerType $ gets blocksEnv
+  benv <- gets blocksEnv
   maybe (fail internalErrMsg) (return . id) $ Map.lookup name benv
 
 newBlock :: CompilerType AST.Name
@@ -115,12 +113,12 @@ newBlock = do
   name <- getNewLabel
   addNextBlock name
   let newBlock = defaultBasicBlockInfo { blockName = name }
-  CompilerType $ modify (\s -> s { blocksEnv = Map.insert name newBlock (blocksEnv s) })
+  modify (\s -> s { blocksEnv = Map.insert name newBlock (blocksEnv s) })
   return name
 
 addInstrsToBlock :: AST.Name -> [AST.Named AST.Instruction] -> CompilerType ()
 addInstrsToBlock name instrs = do
-  CompilerType $ modify (\s -> s { blocksEnv =
+  modify (\s -> s { blocksEnv =
     (Map.update (\x -> Just ((flip addInstrs) instrs x)) name (blocksEnv s))})
 
 isBlockTerminated :: AST.Name -> CompilerType Bool
@@ -130,22 +128,22 @@ isBlockTerminated name = do
 
 setBlockTerminator :: AST.Name -> AST.Named AST.Terminator -> CompilerType ()
 setBlockTerminator name term = do
-  CompilerType $ modify (\s -> s { blocksEnv =
+  modify (\s -> s { blocksEnv =
     (Map.update (\x -> Just (x { blockTerminator = Just term })) name (blocksEnv s)) })
 
 setUnBlockTerminator :: AST.Name -> AST.Named AST.Terminator -> CompilerType ()
 setUnBlockTerminator name term = do
   ifterm <- isBlockTerminated name
   if not ifterm
-    then CompilerType $ modify (\s -> s { blocksEnv =
+    then modify (\s -> s { blocksEnv =
       (Map.update (\x -> Just (x { blockTerminator = Just term })) name (blocksEnv s)) })
     else return ()
 
 setCurrentBlock :: Name -> CompilerType ()
-setCurrentBlock name = CompilerType $ modify (\s -> s { currentBlock = name })
+setCurrentBlock name = modify (\s -> s { currentBlock = name })
 
 getCurrentBlock :: CompilerType Name
-getCurrentBlock = CompilerType $ gets currentBlock
+getCurrentBlock = gets currentBlock
 
 newCurrentBlock :: CompilerType AST.Name
 newCurrentBlock = do
@@ -170,7 +168,7 @@ isCurrentBlockTerminated = do
 
 getBasicBlocks :: CompilerType [AST.BasicBlock]
 getBasicBlocks = do
-  bl <- CompilerType $ gets blocks
+  bl <- gets blocks
   mapM (\b -> do
     bbi <- getBlock b
     compileBasicBlockInfo bbi) bl
@@ -181,24 +179,24 @@ addStringConst :: String -> CompilerType Name
 addStringConst str = do
   name <- getNewStringConstName
   let str' = str ++  endOfStringSign
-  CompilerType $ modify $ (\s -> s { stringConsts = Map.insert str' name (stringConsts s) })
+  modify $ (\s -> s { stringConsts = Map.insert str' name (stringConsts s) })
   return name
 
 refToStringConst :: String -> CompilerType AST.Operand
 refToStringConst str = do
-  strConstEnv <- CompilerType $ gets stringConsts
+  strConstEnv <- gets stringConsts
   name <- maybe (addStringConst str) (return . id) (Map.lookup (str ++ endOfStringSign) strConstEnv)
   nameInstruction stringType $ Instruction.GetElementPtr True (ConstantOperand $
                         GlobalReference (constStringType (length str)) name) [getIntConstOper 0, getIntConstOper 0] []
 
 getStrConstDefs :: CompilerType [AST.Definition]
 getStrConstDefs = do
-  strConstEnv <- CompilerType $ gets stringConsts
+  strConstEnv <- gets stringConsts
   return $ map (\(str, name) -> globalStringConst name str) (Map.toList strConstEnv)
 
 getFunRetType :: String -> CompilerType AST.Type
 getFunRetType ident = do
-  tenv <- CompilerType $ gets glFunTypeEnv
+  tenv <- gets glFunTypeEnv
   case (Map.lookup ident tenv) of
     Just (TFun rType _, _, _)  -> compileType rType
     Nothing -> fail internalErrMsg
@@ -209,7 +207,7 @@ getNewNr' s =
  where NumSupplier num = supplier s
 
 getNewNr :: CompilerType Int
-getNewNr = CompilerType $ state getNewNr'
+getNewNr = state getNewNr'
 
 getNewStrNr' :: CompilerState -> (Int, CompilerState)
 getNewStrNr' s =
@@ -217,7 +215,7 @@ getNewStrNr' s =
  where NumSupplier num = supplierStr s
 
 getNewStrNr :: CompilerType Int
-getNewStrNr = CompilerType $ state getNewNr'
+getNewStrNr = state getNewNr'
 
 getNewStringConstName :: CompilerType Name
 getNewStringConstName = do
@@ -404,7 +402,7 @@ compileCProgram name prog = runCompilerType $ compileCProgram' name prog
 
 compileCProgram' :: String -> CProgram -> CompilerType AST.Module
 compileCProgram' name prog@(CProgram topdefs) = do
-  CompilerType $ modify (\s -> s { glFunTypeEnv = getGlobalCDefsTypesEnv prog })
+  modify (\s -> s { glFunTypeEnv = getGlobalCDefsTypesEnv prog })
   decls <- funDeclForBuiltIns
   defs <- mapM compileCTopDef topdefs
   strConstDefs <- getStrConstDefs

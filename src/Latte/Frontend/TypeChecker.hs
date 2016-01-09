@@ -13,47 +13,35 @@ import Latte.Internal.ASTInternal
 import Control.Applicative (Applicative)
 import Control.Monad
 import Control.Monad.Trans.Class
-import Control.Monad.Trans.State
+import Control.Monad.State
 import qualified Data.Map as Map
 import Data.List
 
 internalErrMsg :: String
 internalErrMsg = "Internal error during type checking phase.\n"
 
-type CheckerState = (TypeEnv, Int)
+data CheckerState = CheckerState  { environment :: TypeEnv, depth :: Int }
 
 topLevelDepth = 0
+defaultCheckerState = CheckerState { environment = emptyTypeEnv, depth = topLevelDepth }
 
 newtype CheckerType a = CheckerType (StateT CheckerState Err a)
-  deriving (Functor, Applicative, Monad)
+  deriving (Functor, Applicative, Monad, MonadState CheckerState)
 
 runCheckerType :: CheckerType a -> Err a
-runCheckerType (CheckerType x) = evalStateT x (emptyTypeEnv, topLevelDepth)
-
-putEnv' :: TypeEnv -> CheckerState -> CheckerState
-putEnv' env (_, depth) =  (env, depth)
+runCheckerType (CheckerType x) = evalStateT x defaultCheckerState
 
 putEnv :: TypeEnv -> CheckerType ()
-putEnv env = CheckerType $ modify $ putEnv' env
+putEnv env = modify $ (\s -> s { environment = env })
 
 getEnv :: CheckerType TypeEnv
-getEnv = CheckerType $ gets fst
-
-addToEnv' :: String -> TypeInfo -> CheckerState -> CheckerState
-addToEnv' id t (env, depth) =
-  (env', depth)
- where env' = Map.insert id t env
+getEnv = gets environment
 
 addToEnv :: String -> TypeInfo -> CheckerType ()
-addToEnv id t = CheckerType $ modify $ addToEnv' id t
-
-removeFromEnv' :: String -> CheckerState -> CheckerState
-removeFromEnv' id (env, depth) =
-  (env', depth)
- where env' = Map.delete id env
+addToEnv ident t = modify $ (\s -> s { environment = Map.insert ident t $ environment s })
 
 removeFromEnv :: String ->  CheckerType ()
-removeFromEnv id = CheckerType $ modify $ removeFromEnv' id
+removeFromEnv ident = modify $ (\s -> s { environment = Map.delete ident $ environment s })
 
 lookupTypeEnv :: String -> CheckerType (Maybe TypeInfo)
 lookupTypeEnv id = do
@@ -61,16 +49,16 @@ lookupTypeEnv id = do
   return $ Map.lookup id env
 
 getDepth :: CheckerType Int
-getDepth = CheckerType $ gets snd
+getDepth = gets depth
 
-changeDepth' :: (Int -> Int) -> CheckerState -> CheckerState
-changeDepth' f (env, depth) = (env, f depth)
+changeDepth' :: (Int -> Int) -> CheckerType ()
+changeDepth' f = modify $ (\s -> s { depth = f $ depth s })
 
 incDepth :: CheckerType ()
-incDepth = CheckerType $ modify $ changeDepth' (1+)
+incDepth = changeDepth' (1+)
 
 decDepth :: CheckerType ()
-decDepth = CheckerType $ modify $ changeDepth' (1-)
+decDepth = changeDepth' (1-)
 
 typeError :: Position -> String -> Maybe Expr -> Maybe Type -> Type -> String
 typeError pos errMsg mexpr mtexpected tfound  =
@@ -173,7 +161,7 @@ checkIfRedeclared (PIdent (pos, id)) = do
   depth <- getDepth
   mt <- lookupTypeEnv id
   case mt of
-    Nothing         -> return ()
+    Nothing                     -> return ()
     Just (t, decPos, depthDec)  ->
       if depth == depthDec
         then fail $ redecError pos id decPos
