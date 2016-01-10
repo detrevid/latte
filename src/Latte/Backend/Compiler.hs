@@ -31,6 +31,7 @@ import Debug.Trace
 import Data.Char
 import Data.List
 import Data.Maybe
+import qualified Data.Int as HInt
 import Control.Applicative (Applicative)
 import Control.Monad.State
 import qualified Control.Monad.Except as Except
@@ -291,6 +292,7 @@ charType = i8
 charBits = 8
 intType = i32
 intBits = 32
+maxInt = (toInteger (maxBound :: HInt.Int32))
 stringType = PointerType charType defaultAddrSpace
 
 constStringType :: Int -> AST.Type
@@ -305,7 +307,9 @@ compileType x = case x of
   _ -> fail internalErrMsg
 
 getIntConstOper :: Integer -> Operand
-getIntConstOper val = ConstantOperand $ Int { integerBits = intBits, integerValue = val }
+getIntConstOper val =
+  ConstantOperand $ Int { integerBits = intBits, integerValue = val' }
+ where val' = val `rem` (maxInt + 1)
 
 getBoolConstOper :: Bool -> Operand
 getBoolConstOper b = case b of

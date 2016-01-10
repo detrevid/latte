@@ -1,0 +1,25 @@
+int main() {
+  int x = 999999999999;
+  int y = 1000000000000;
+  printInt(x);
+  x = x + 1;
+  printInt(x);
+  if (x == y) foo();
+  int z = 2147483647;
+  int p = 2147483648;
+  printInt(z);
+  int q = z + 1;
+  printInt(q);
+  if (q == p) foo();
+  p = 999999999;
+  p = p * 100;
+  q = 99999999900;
+  printInt(p);
+  printInt(q);
+  if (q == p) foo();
+  return 0;
+}
+
+void foo() {
+ printString("foo");
+}
