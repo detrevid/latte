@@ -20,10 +20,18 @@ import Data.List
 internalErrMsg :: String
 internalErrMsg = "Internal error during type checking phase.\n"
 
-data CheckerState = CheckerState  { environment :: TypeEnv, depth :: Int }
+data CheckerState = CheckerState  {
+  environment     :: TypeEnv,
+  depth           :: Int,
+  expectedRetType :: Type
+  }
 
 topLevelDepth = 0
-defaultCheckerState = CheckerState { environment = emptyTypeEnv, depth = topLevelDepth }
+defaultCheckerState = CheckerState {
+  environment = emptyTypeEnv,
+  depth = topLevelDepth,
+  expectedRetType = typeVoid
+  }
 
 newtype CheckerType a = CheckerType (StateT CheckerState Err a)
   deriving (Functor, Applicative, Monad, MonadState CheckerState)
@@ -138,7 +146,8 @@ checkTypesTopDef tdef = case tdef of
       checkDeclVarType pos t
       addToEnv id (t, pos, depth)
       return $ CArg t id) args
-    (tblock, CBlock cblock) <- checkTypesBlock block tret
+    modify (\s -> s { expectedRetType = tret })
+    (tblock, CBlock cblock) <- checkTypesBlock block
     when (tblock /= tret) (fail $ typeError pos ("Function " ++ id ++
       " not always returns expected type.") Nothing (Just tret) tblock)
     decDepth
@@ -147,11 +156,12 @@ checkTypesTopDef tdef = case tdef of
       then return $ CTDFnDef tret id cargs (CBlock $ cblock ++ [CSVRet])
       else return $ CTDFnDef tret id cargs (CBlock cblock)
 
-checkTypesBlock :: Block -> Type -> CheckerType (Type, CBlock)
-checkTypesBlock (Block stmts) exRetType = do
+checkTypesBlock :: Block -> CheckerType (Type, CBlock)
+checkTypesBlock (Block stmts) = do
   incDepth
-  (tstmts, cstmts) <- fmap unzip $ mapM ((flip checkTypesStmt) exRetType) stmts
+  (tstmts, cstmts) <- fmap unzip $ mapM checkTypesStmt stmts
   decDepth
+  exRetType <- gets expectedRetType
   if any ((==) exRetType) tstmts
     then return (exRetType, CBlock cstmts)
     else return (typeVoid, CBlock cstmts)
@@ -160,19 +170,15 @@ checkIfRedeclared :: PIdent -> CheckerType ()
 checkIfRedeclared (PIdent (pos, id)) = do
   depth <- getDepth
   mt <- lookupTypeEnv id
-  case mt of
-    Nothing                     -> return ()
-    Just (t, decPos, depthDec)  ->
-      if depth == depthDec
-        then fail $ redecError pos id decPos
-        else return ()
+  maybe (return ()) (\(t, decPos, depthDec) -> when (depth == depthDec) $ fail $ redecError pos id decPos) mt
+  return ()
 
-checkTypesStmt :: Stmt -> Type -> CheckerType (Type, CStmt)
-checkTypesStmt x exRetType = case x of
+checkTypesStmt :: Stmt -> CheckerType (Type, CStmt)
+checkTypesStmt x = case x of
   SEmpty -> return (typeVoid, CSEmpty)
   SBlock block -> do
     odlEnv <- getEnv
-    (t, cblock) <- checkTypesBlock block exRetType
+    (t, cblock) <- checkTypesBlock block
     putEnv odlEnv
     return (t, CSBlock cblock)
   SDecl t items -> do
@@ -214,16 +220,18 @@ checkTypesStmt x exRetType = case x of
   SRet (TRet (pos, _)) expr -> do
     (texpr, cexpr) <- checkTypesExpr expr
     when (texpr == typeVoid) (fail $ typeError pos "Use of permitted type in return statement." Nothing Nothing texpr)
+    exRetType <- gets expectedRetType
     when (texpr /= exRetType) (fail $ typeError pos "Bad return type." (Just expr) (Just exRetType) texpr)
     return (texpr, CSRet cexpr)
   SVRet (TRet (pos, _)) -> do
+    exRetType <- gets expectedRetType
     when (typeVoid  /= exRetType) (fail $ typeError pos "Bad return type." Nothing (Just exRetType) typeVoid)
     return (typeVoid, CSVRet)
   SCond (TIf (pos, _)) expr stmt -> do
     (texpr, cexpr) <- checkTypesExpr expr
     odlEnv <- getEnv
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." (Just expr) (Just typeBool) texpr)
-    (tstmt, cstmt) <- checkTypesStmt stmt exRetType
+    (tstmt, cstmt) <- checkTypesStmt stmt
     putEnv odlEnv
     if isCTExprTrue cexpr
       then return (tstmt, cstmt)
@@ -232,10 +240,11 @@ checkTypesStmt x exRetType = case x of
     (texpr, cexpr) <- checkTypesExpr expr
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in if condition." (Just expr) (Just typeBool) texpr)
     odlEnv <- getEnv
-    (tretif, cstmt1) <- checkTypesStmt stmt1 exRetType
+    (tretif, cstmt1) <- checkTypesStmt stmt1
     putEnv odlEnv
-    (tretel, cstmt2)<- checkTypesStmt stmt2 exRetType
+    (tretel, cstmt2)<- checkTypesStmt stmt2
     putEnv odlEnv
+    exRetType <- gets expectedRetType
     case (isCTExprTrue cexpr, isCTExprFalse cexpr) of
       (True, _) -> return (tretif, cstmt1)
       (_, True) -> return (tretel, cstmt2)
@@ -247,8 +256,9 @@ checkTypesStmt x exRetType = case x of
     (texpr, cexpr) <- checkTypesExpr expr
     when (texpr /= typeBool) (fail $ typeError pos "Bad type in while condition." (Just expr) (Just typeBool) texpr)
     odlEnv <- getEnv
-    (trestmt, cstmt) <- checkTypesStmt stmt exRetType
+    (trestmt, cstmt) <- checkTypesStmt stmt
     putEnv odlEnv
+    exRetType <- gets expectedRetType
     if isCTExprTrue cexpr
       then return (exRetType, CSRepeat cstmt)
       else return (typeVoid, CSWhile cexpr cstmt)
@@ -324,7 +334,13 @@ checkTypesExpr' x = case x of
         (texpr2, cexpr2) <- checkTypesExpr expr2
         when (texpr1 /= texpr2) $ fail $ typeError pos ("Binary operator " ++ show opr ++
               " applied to expression.") (Just expr2) (Just texpr1) texpr2
-        return (typeBool, (CBinOp cexpr1 opr cexpr2, typeBool))
+        if texpr1 == typeString
+          then
+            if opr == eqOp
+              then return (typeBool, (CEApp (functionName equalsStringFI) [cexpr1, cexpr2], typeBool))
+              else return (typeBool, (CBinOp (CELit (CLBool True), typeBool) "^"
+                (CEApp (functionName equalsStringFI) [cexpr1, cexpr2], typeBool), typeBool))
+          else return (typeBool, (CBinOp cexpr1 opr cexpr2, typeBool))
       else checkTypesBinOp info expr1 expr2 typeInt typeBool
   EAnd expr1 (TLogAndOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeBool typeBool
   EOr expr1 (TLogOrOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeBool typeBool

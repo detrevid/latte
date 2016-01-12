@@ -91,10 +91,10 @@ getEnv :: CompilerType CompilerEnv
 getEnv = gets environment
 
 addToEnv :: AST.Name -> AST.Operand -> CompilerType ()
-addToEnv ident t = modify $ (\s -> s { environment = Map.insert ident t (environment s) })
+addToEnv ident t = modify $ \s -> s { environment = Map.insert ident t (environment s) }
 
 removeFromEnv :: AST.Name -> CompilerType ()
-removeFromEnv ident = modify $ (\s -> s { environment = Map.delete ident (environment s) })
+removeFromEnv ident = modify $ \s -> s { environment = Map.delete ident (environment s) }
 
 lookupEnv :: AST.Name -> CompilerType AST.Operand
 lookupEnv ident = do
@@ -114,13 +114,13 @@ newBlock = do
   name <- getNewLabel
   addNextBlock name
   let newBlock = defaultBasicBlockInfo { blockName = name }
-  modify (\s -> s { blocksEnv = Map.insert name newBlock (blocksEnv s) })
+  modify $ \s -> s { blocksEnv = Map.insert name newBlock (blocksEnv s) }
   return name
 
 addInstrsToBlock :: AST.Name -> [AST.Named AST.Instruction] -> CompilerType ()
 addInstrsToBlock name instrs = do
-  modify (\s -> s { blocksEnv =
-    (Map.update (\x -> Just ((flip addInstrs) instrs x)) name (blocksEnv s))})
+  modify $ \s -> s { blocksEnv =
+    (Map.update (\x -> Just $ (flip addInstrs) instrs x) name (blocksEnv s))}
 
 isBlockTerminated :: AST.Name -> CompilerType Bool
 isBlockTerminated name = do
@@ -141,7 +141,7 @@ setUnBlockTerminator name term = do
     else return ()
 
 setCurrentBlock :: Name -> CompilerType ()
-setCurrentBlock name = modify (\s -> s { currentBlock = name })
+setCurrentBlock name = modify $ \s -> s { currentBlock = name }
 
 getCurrentBlock :: CompilerType Name
 getCurrentBlock = gets currentBlock
@@ -406,7 +406,7 @@ compileCProgram name prog = runCompilerType $ compileCProgram' name prog
 
 compileCProgram' :: String -> CProgram -> CompilerType AST.Module
 compileCProgram' name prog@(CProgram topdefs) = do
-  modify (\s -> s { glFunTypeEnv = getGlobalCDefsTypesEnv prog })
+  modify $ \s -> s { glFunTypeEnv = getGlobalCDefsTypesEnv prog }
   decls <- funDeclForBuiltIns
   defs <- mapM compileCTopDef topdefs
   strConstDefs <- getStrConstDefs

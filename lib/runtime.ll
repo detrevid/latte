@@ -26,6 +26,8 @@ declare i64 @strlen(i8* nocapture)
 
 declare i8* @strcat(i8*, i8* nocapture readonly)
 
+declare i32 @strcmp(i8*, i8*)
+
 define void @error() {
 entry:
   %0 = tail call i32 @puts(i8* getelementptr inbounds ([14 x i8]* @str.error, i64 0, i64 0))
@@ -138,4 +140,16 @@ define i8* @concatString(i8* %str1, i8* %str2) {
 ; <label>:21                                      ; preds = %20, %11
   %22 = load i8** %new_str, align 8
   ret i8* %22
+}
+
+define zeroext i1 @equalsString(i8* %str1, i8* %str2) {
+  %1 = alloca i8*, align 8
+  %2 = alloca i8*, align 8
+  store i8* %str1, i8** %1, align 8
+  store i8* %str2, i8** %2, align 8
+  %3 = load i8** %1, align 8
+  %4 = load i8** %2, align 8
+  %5 = call i32 @strcmp(i8* %3, i8* %4) #7
+  %6 = icmp eq i32 %5, 0
+  ret i1 %6
 }

@@ -66,7 +66,13 @@ concatStringFI = FunctionInfo {
   functionArguments  = [(typeString, "str1"), (typeString, "str2")]
 }
 
-builtIns = [printIntFI,  printStringFI, errorFI, readIntFI, readStringFI, concatStringFI]
+equalsStringFI = FunctionInfo {
+  functionName       = "equalsString",
+  functionReturnType = typeBool,
+  functionArguments  = [(typeString, "str1"), (typeString, "str2")]
+}
+
+builtIns = [printIntFI,  printStringFI, errorFI, readIntFI, readStringFI, concatStringFI, equalsStringFI]
 
 builtInsTypeInfos = map getBinFunTypeInfo builtIns
 
