@@ -23,7 +23,7 @@ compileToAssemblerFile compiler filePath extension = do
   path <- parseFilePath filePath
   let name = takeFileName path
   let outputFile = addExtension path extension
-  withFile filePath ReadMode (\handle -> do
+  withFile filePath ReadMode $ \handle -> do
     contents <- hGetContents handle
     compiledProgram <- compile compiler name contents
     case compiledProgram of
@@ -33,12 +33,11 @@ compileToAssemblerFile compiler filePath extension = do
       Bad m -> do
         hPutStrLn stderr ("ERROR\n" ++ m)
         exitFailure
-        )
   return outputFile
 
 compile :: (String -> Program -> IO (Err String)) -> String -> String -> IO (Err String)
 compile compiler fileName code  =
-  let p = pProgram (myLexer code)
+  let p = pProgram $ myLexer code
   in case p of
     Ok prog -> compiler fileName prog
     Bad m -> return $ Bad m

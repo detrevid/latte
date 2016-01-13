@@ -50,14 +50,14 @@ newNumSupplier :: NumSupplier
 newNumSupplier = NumSupplier [ n | n <- [0..]]
 
 data CompilerState = CompilerState {
-  environment :: CompilerEnv,
-  blocksEnv :: BlocksEnv,
-  blocks :: [AST.Name],
+  environment  :: CompilerEnv,
+  blocksEnv    :: BlocksEnv,
+  blocks       :: [AST.Name],
   currentBlock :: AST.Name,
-  supplier :: NumSupplier,
+  supplier     :: NumSupplier,
   glFunTypeEnv :: TypeEnv,
   stringConsts ::StringConstEnv,
-  supplierStr :: NumSupplier
+  supplierStr  :: NumSupplier
   } deriving (Show)
 
 defaultCompilerState = CompilerState {
@@ -81,7 +81,7 @@ resetCompilerState ::  CompilerType ()
 resetCompilerState = CompilerType $ modify $ (\s -> defaultCompilerState {
   glFunTypeEnv = glFunTypeEnv s,
   stringConsts = stringConsts s,
-  supplierStr = supplierStr s
+  supplierStr  = supplierStr s
   })
 
 putEnv :: CompilerEnv -> CompilerType ()

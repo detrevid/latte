@@ -44,11 +44,3 @@ data CExpr
     | CEApp CIdent [CTExpr]
     | CBinOp CTExpr COperator CTExpr
   deriving (Eq, Ord, Show, Read)
-
-isCTExprTrue :: CTExpr -> Bool
-isCTExprTrue (CELit (CLBool val), _) = val
-isCTExprTrue _ = False
-
-isCTExprFalse :: CTExpr -> Bool
-isCTExprFalse (CELit (CLBool val), _) = not val
-isCTExprFalse _ = False

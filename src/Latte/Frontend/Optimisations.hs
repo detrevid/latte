@@ -1,4 +1,4 @@
-module Latte.Frontend.Optimisations (constantFolding) where
+module Latte.Frontend.Optimisations (constantFolding, isCTExprTrue, isCTExprFalse) where
 
 import Latte.BNFC.ErrM
 import Latte.BNFC.PrintLatte
@@ -81,3 +81,11 @@ constantFolding ctexpr@(CBinOp exp1 op exp2, t) = do
         _ -> fail $ internalErrMsg
     _ -> return ctexpr
 constantFolding x = return x
+
+isCTExprTrue :: CTExpr -> Bool
+isCTExprTrue (CELit (CLBool val), _) = val
+isCTExprTrue _ = False
+
+isCTExprFalse :: CTExpr -> Bool
+isCTExprFalse (CELit (CLBool val), _) = not val
+isCTExprFalse _ = False

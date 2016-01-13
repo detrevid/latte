@@ -346,7 +346,7 @@ checkTypesExpr' x = case x of
   EOr expr1 (TLogOrOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeBool typeBool
 
 
-checkTypesBinOp :: ((Int, Int), String) -> Expr -> Expr -> Type -> Type -> CheckerType (Type, CTExpr)
+checkTypesBinOp :: (Position, String) -> Expr -> Expr -> Type -> Type -> CheckerType (Type, CTExpr)
 checkTypesBinOp (pos, opr) expl expr eType rtype = do
   (texpl, cexpl) <- checkTypesExpr expl
   when (texpl /= eType) $ fail $ typeError pos ("Binary operator " ++ show opr ++
