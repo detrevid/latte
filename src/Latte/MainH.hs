@@ -1,6 +1,5 @@
 module Latte.MainH where
 
-import Latte.BNFC.LexLatte
 import Latte.BNFC.ParLatte
 import Latte.BNFC.AbsLatte
 import Latte.BNFC.ErrM
@@ -47,7 +46,6 @@ mainH compiler extension generateObjectCode = do
   args <- getArgs
   when (length args /= 1) (fail "BAD NUMBER OF ARGUMENTS")
   let filePath = args !! 0
-  path <- parseFilePath filePath
   assemblerPath <- compileToAssemblerFile compiler filePath extension
   putStrLn $ "Generated: " ++ assemblerPath
   generateObjectCode assemblerPath

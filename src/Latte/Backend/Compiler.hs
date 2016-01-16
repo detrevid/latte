@@ -27,9 +27,7 @@ import LLVM.General.Module
 import Control.Conditional
 import qualified Control.Conditional as Cond
 import qualified Data.Map as Map
-import Debug.Trace
 import Data.Char
-import Data.List
 import Data.Maybe
 import qualified Data.Int as HInt
 import Control.Applicative (Applicative)
@@ -93,8 +91,10 @@ getEnv = gets environment
 addToEnv :: AST.Name -> AST.Operand -> CompilerType ()
 addToEnv ident t = modify $ \s -> s { environment = Map.insert ident t (environment s) }
 
+{-
 removeFromEnv :: AST.Name -> CompilerType ()
 removeFromEnv ident = modify $ \s -> s { environment = Map.delete ident (environment s) }
+-}
 
 lookupEnv :: AST.Name -> CompilerType AST.Operand
 lookupEnv ident = do
@@ -319,8 +319,8 @@ getBoolConstOper b = case b of
 getCharConst :: Char -> Constant
 getCharConst c = Int charBits $ fromIntegral $ ord c
 
-getCharConstOper :: Char -> Operand
-getCharConstOper c = ConstantOperand $ getCharConst c
+{-getCharConstOper :: Char -> Operand
+getCharConstOper c = ConstantOperand $ getCharConst c-}
 
 defaultIntVal = getIntConstOper 0
 defaultBoolVal = getBoolConstOper False
@@ -363,8 +363,7 @@ alloc t = nameInstruction (PointerType t defaultAddrSpace) $ Alloca t Nothing 0 
 
 load :: AST.Operand -> CompilerType AST.Operand
 load op = case op of
-  LocalReference (PointerType pref _) name ->
-    nameInstruction pref $ Load False op Nothing 0 []
+  LocalReference (PointerType pref _) _ -> nameInstruction pref $ Load False op Nothing 0 []
   _ -> fail internalErrMsg
 
 loadVar :: String -> CompilerType AST.Operand
@@ -402,23 +401,23 @@ compileModuleToLLVM mod = withContext $ \context ->
       return compiled
 
 compileCProgram :: String -> CProgram -> Err AST.Module
-compileCProgram name prog = runCompilerType $ compileCProgram' name prog
+compileCProgram pname prog = runCompilerType $ compileCProgram' pname prog
 
 compileCProgram' :: String -> CProgram -> CompilerType AST.Module
-compileCProgram' name prog@(CProgram topdefs) = do
+compileCProgram' pname prog@(CProgram topdefs) = do
   modify $ \s -> s { glFunTypeEnv = getGlobalCDefsTypesEnv prog }
   decls <- funDeclForBuiltIns
   defs <- mapM compileCTopDef topdefs
   strConstDefs <- getStrConstDefs
-  return $ newModule name (strConstDefs ++ decls ++ defs)
+  return $ newModule pname (strConstDefs ++ decls ++ defs)
 
 compileCTopDef :: CTopDef -> CompilerType AST.Definition
 compileCTopDef x = case x of
   CTDFnDef tret ident args block -> do
     resetCompilerState
-    entryLabel <- newCurrentBlock
+    newCurrentBlock
     tret' <- compileType tret
-    let name = Name ident
+    let fname = Name ident
     params <- mapM (\(CArg atype aid) -> do
       atype' <- compileType atype
       let aname = Name aid
@@ -426,7 +425,7 @@ compileCTopDef x = case x of
     mapM_ (\(Parameter atype aname _) -> allocAndStore atype aname (LocalReference atype aname)) params
     compileCBlock block
     bblocks <- getBasicBlocks
-    return $ newGlobalFunctionDef tret' name params bblocks
+    return $ newGlobalFunctionDef tret' fname params bblocks
 
 compileCBlock :: CBlock -> CompilerType ()
 compileCBlock (CBlock stmts) = do
@@ -449,8 +448,8 @@ compileCStmt x = case x of
       CINoInit ident   -> do
         val <- defaultValue t
         allocAndStore t' (Name ident) val
-      CIInit ident exp -> do
-        val <- compileCExpr exp
+      CIInit ident expr -> do
+        val <- compileCExpr expr
         allocAndStore t' (Name ident) val
           ) items
   CSAss ident expr -> do
@@ -503,6 +502,7 @@ compileCExpr (x, tx) = case x of
   CEVar ident -> loadVar ident
   CBinOp expr1 opr expr2 -> compileCBinOpr expr1 expr2 opr tx
 
+binOprs :: Map.Map String (Operand -> Operand -> InstructionMetadata -> Instruction)
 binOprs = Map.fromList [
   ("<", AST.ICmp IntPred.SLT),
   ("<=", AST.ICmp IntPred.SLE),

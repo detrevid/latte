@@ -1,13 +1,9 @@
 module Latte.Internal.BuiltIn where
 
 import Latte.BNFC.AbsLatte
-import Latte.BNFC.ErrM
 import Latte.Internal.Type
 
 import qualified Data.Map as Map
-import Debug.Trace
-import Control.Monad.State
-import qualified Control.Monad.Trans.State as StateT
 
 binpos = (-1,-1)
 bidepth = 0

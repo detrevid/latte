@@ -1,24 +1,13 @@
 module Latte.Main where
 
-import Latte.BNFC.LexLatte
-import Latte.BNFC.ParLatte
 import Latte.BNFC.AbsLatte
 import Latte.BNFC.ErrM
-import Latte.BNFC.PrintLatte
 import Latte.Frontend.BasicChecker
-import Latte.Backend.Compiler
 import Latte.Backend.Compiler
 import Latte.MainH
 
-import Control.Monad.State
-import Data.Map as Map
-import Debug.Trace
-import System.IO
-import System.IO.Unsafe
-import Control.Monad
 import System.Environment
 import System.FilePath
-import System.IO
 import System.Process (callCommand)
 
 import qualified LLVM.General.AST as AST

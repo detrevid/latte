@@ -1,15 +1,10 @@
 module Latte.Frontend.Optimisations (constantFolding, isCTExprTrue, isCTExprFalse) where
 
 import Latte.BNFC.ErrM
-import Latte.BNFC.PrintLatte
-import Latte.Internal.BuiltIn
 import Latte.Internal.Type
 import Latte.Internal.ASTInternal
 
-import Control.Applicative (Applicative)
-import Control.Monad
 import qualified Data.Map as Map
-import Data.List
 
 internalErrMsg :: String
 internalErrMsg = "Internal error during optimisation phase.\n"
@@ -58,11 +53,11 @@ strEqOprsFs = Map.fromList [
   ]
 
 constantFolding :: CTExpr -> Err CTExpr
-constantFolding ctexpr@(CBinOp exp1 op exp2, t) = do
+constantFolding ctexpr@(CBinOp exp1 op exp2, _) = do
   exp1' <- constantFolding exp1
   exp2' <- constantFolding exp2
   case (exp1', exp2') of
-    ((CELit lit1, tl1), (CELit lit2, tl2)) ->
+    ((CELit lit1, _), (CELit lit2, _)) ->
       case (lit1, lit2) of
         (CLInt val1, CLInt val2) ->
           case (elem op relOprs, elem op artOprs) of

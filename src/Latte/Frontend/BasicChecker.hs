@@ -6,8 +6,6 @@ import Latte.Frontend.TypeChecker
 import Latte.Internal.Type
 import Latte.Internal.ASTInternal
 
-import Latte.Backend.Compiler
-
 import Data.List
 
 doChecks :: Program -> Err CProgram
