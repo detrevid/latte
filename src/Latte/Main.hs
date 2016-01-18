@@ -2,7 +2,7 @@ module Latte.Main where
 
 import Latte.BNFC.AbsLatte
 import Latte.BNFC.ErrM
-import Latte.Frontend.BasicChecker
+import Latte.Frontend.Precompiler
 import Latte.Backend.Compiler
 import Latte.MainH
 
@@ -14,7 +14,7 @@ import qualified LLVM.General.AST as AST
 
 compileProg' :: String -> Program -> Err AST.Module
 compileProg' name prog = do
-  cprog <- doChecks prog
+  cprog <- precompile prog
   compileCProgram name cprog
 
 compileProg :: String -> Program -> IO (Err String)

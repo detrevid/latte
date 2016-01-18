@@ -1,6 +1,7 @@
 module Latte.Internal.ASTInternal where
 
 import Latte.BNFC.AbsLatte
+import Latte.Internal.Type
 
 type CIdent = String
 type COperator = String
@@ -10,6 +11,8 @@ data CBlock = CBlock [CStmt]
 
 data CItem = CINoInit CIdent | CIInit CIdent CTExpr
   deriving (Eq, Ord, Show, Read)
+
+type CProgramInfo = (CProgram, ClassEnv, TypeEnv)
 
 data CProgram = CProgram [CTopDef]
   deriving (Eq, Ord, Show, Read)

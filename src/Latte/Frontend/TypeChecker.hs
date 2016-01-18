@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module Latte.Frontend.TypeChecker (checkTypes, getGlobalCDefsEnv) where
+module Latte.Frontend.TypeChecker (checkTypes) where
 
 import Latte.BNFC.AbsLatte
 import Latte.BNFC.ErrM
@@ -107,29 +107,17 @@ redecError pos ident decPos =
 unknownTypeError :: Position -> Type -> String
 unknownTypeError pos t = typeError pos "Unknown type." Nothing Nothing t
 
-checkTypes' :: Program -> CheckerType CProgram
+checkTypes' :: Program -> CheckerType CProgramInfo
 checkTypes' prog@(Program topdefs) = do
   putEnv $ addBuiltInsToTypeEnv emptyTypeEnv
   addTopDefsToEnv prog
   ctopdefs <- mapM checkTypesTopDef topdefs
-  return $ CProgram ctopdefs
+  cenv <- gets classEnv
+  tenv <- gets typeEnv
+  return $ (CProgram ctopdefs, cenv, tenv)
 
-checkTypes :: Program -> Err CProgram
+checkTypes :: Program -> Err CProgramInfo
 checkTypes prog = runCheckerType $ checkTypes' prog
-
-getGlobalCDefsEnv' :: CProgram -> CheckerType (TypeEnv, ClassEnv)
-getGlobalCDefsEnv' prog = do
-  putEnv $ addBuiltInsToTypeEnv emptyTypeEnv
-  addTopCDefsToEnv prog
-  tenv <- getEnv
-  tclass <- gets classEnv
-  return (tenv, tclass)
-
-getGlobalCDefsEnv :: CProgram -> (TypeEnv, ClassEnv)
-getGlobalCDefsEnv prog =
-  case (runCheckerType $ getGlobalCDefsEnv' prog) of
-    Ok envs -> envs
-    Bad _   -> (emptyTypeEnv, emptyClassEnv)
 
 addTopDefsToEnv :: Program -> CheckerType ()
 addTopDefsToEnv (Program tdefs) =
@@ -156,27 +144,6 @@ removePosFromType :: Type -> Type
 removePosFromType t = case t of
   TType (TClass (CPType (PIdent (_, id)))) -> classType id
   _ -> t
-
-addTopCDefsToEnv :: CProgram -> CheckerType ()
-addTopCDefsToEnv (CProgram tdefs) =
-  mapM_ (\tdef -> case tdef of
-    CTDFnDef tret id args _ -> do
-      mt <- lookupTypeEnv id
-      case mt of
-        Nothing -> do
-          let targs = map (\(CArg t _) -> removePosFromType t) args
-          addToEnv id ((TFun (removePosFromType tret) targs), (0, 0), topLevelDepth)
-        Just _ -> fail internalErrMsg
-    CTDCDef (CCDef id (CCBody decls)) -> do
-      mc <- gets $ (Map.lookup id) . classEnv
-      case mc of
-        Nothing -> do
-          let fields = Map.fromList $ map (\((ident, t), i) -> (ident, (removePosFromType t, i))) $ zip (concatMap (\decl -> case decl of
-                          CCVar t idents -> map (\ident -> (ident, t)) idents) decls) [0..]
-              classInfo = (fields, (0, 0))
-          modify (\s -> s { classEnv = Map.insert id classInfo $ classEnv s })
-        Just _ -> fail internalErrMsg
-        ) tdefs
 
 checkDeclVarType :: Position -> Type -> CheckerType Type
 checkDeclVarType pos t = do

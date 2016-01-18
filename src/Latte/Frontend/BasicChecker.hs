@@ -1,17 +1,14 @@
-module Latte.Frontend.BasicChecker where
+module Latte.Frontend.BasicChecker (doBasicChecks) where
 
 import Latte.BNFC.ErrM
 import Latte.BNFC.AbsLatte
-import Latte.Frontend.TypeChecker
 import Latte.Internal.Type
 import Latte.Internal.ASTInternal
 
 import Data.List
 
-doChecks :: Program -> Err CProgram
-doChecks prog = do
-  checkForMain prog
-  checkTypes prog
+doBasicChecks :: Program -> Err ()
+doBasicChecks prog = checkForMain prog
 
 checkForMain :: Program -> Err ()
 checkForMain (Program tdefs) =

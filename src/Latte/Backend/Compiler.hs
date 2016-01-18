@@ -8,7 +8,6 @@ import Latte.BNFC.ErrM
 import Latte.Internal.Type
 import Latte.Internal.BuiltIn
 import Latte.Internal.ASTInternal
-import Latte.Frontend.TypeChecker
 
 import LLVM.General.AST
 import qualified LLVM.General.AST as AST
@@ -466,12 +465,11 @@ compileModuleToLLVM mod = withContext $ \context ->
       compiled <- moduleLLVMAssembly m
       return compiled
 
-compileCProgram :: String -> CProgram -> Err AST.Module
+compileCProgram :: String -> CProgramInfo -> Err AST.Module
 compileCProgram pname prog = runCompilerType $ compileCProgram' pname prog
 
-compileCProgram' :: String -> CProgram -> CompilerType AST.Module
-compileCProgram' pname prog@(CProgram topdefs) = do
-  let (ftenv, cenv) = getGlobalCDefsEnv prog
+compileCProgram' :: String -> CProgramInfo -> CompilerType AST.Module
+compileCProgram' pname (CProgram topdefs, cenv, ftenv) = do
   funenv <- fmap Map.fromList $ mapM (\(ident, tinfo) -> do
     funinfo <- typeInfoToFunInfo tinfo
     return (ident, funinfo)) $ Map.toList ftenv
