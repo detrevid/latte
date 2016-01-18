@@ -1,0 +1,21 @@
+class List {
+  int x;
+  int y;
+  boolean b;
+  string s;
+  int zero;
+}
+
+int main() {
+  List a;
+  a = new List;
+  a.x = 5;
+  printInt(a.x);
+  a.y = 10;
+  printInt(a.y);
+  a.b = true;
+  a.s = "GOOD";
+  if (a.b) printString(a.s);
+  printInt(a.zero);
+  return 0;
+}

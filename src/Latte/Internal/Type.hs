@@ -15,6 +15,9 @@ typeString = TType (TBuiltIn BIStr)
 typeVoid :: Type
 typeVoid = TType (TBuiltIn BIVoid)
 
+classType :: String -> Type
+classType x = TType $ TClass $ CType $ Ident x
+
 type Position = (Int, Int)
 
 type TypeInfo = (Type, Position, Int)
@@ -22,6 +25,11 @@ type TypeInfo = (Type, Position, Int)
 type TypeEnv = Map.Map String TypeInfo
 emptyTypeEnv :: TypeEnv
 emptyTypeEnv = Map.empty
+
+type ClassEnv = Map.Map String ClassInfo
+type ClassInfo = (Map.Map String (Type, Integer), Position)
+emptyClassEnv :: ClassEnv
+emptyClassEnv = Map.empty
 
 negOp = "-"
 notOp = "!"

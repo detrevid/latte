@@ -6,7 +6,7 @@ Program.   Program ::= [TopDef] ;
 
 TDFnDef.   TopDef ::= Type PIdent "(" [Arg] ")" Block ;
 
---TDCDef.    TopDef ::= ClassDef ;
+TDCDef.    TopDef ::= ClassDef ;
 
 separator nonempty TopDef "" ;
 
@@ -40,6 +40,8 @@ position token TLogOrOp {"||"} ;
 
 position token PIdent (letter (letter|digit|'_'|'\'')*) ;
 
+separator nonempty PIdent "," ;
+
 -- Statements ----------------------------------------------
 
 Block.      Block ::= "{" [Stmt] "}" ;
@@ -50,7 +52,7 @@ SEmpty.     Stmt ::= ";" ;
 
 SBlock.     Stmt ::= Block ;
 
-SDecl.      Stmt ::= Type [Item] ";" ;
+SDecl.      Stmt ::= Decl ;
 
 INoInit.    Item ::= PIdent ;
 
@@ -58,7 +60,7 @@ IInit.      Item ::= PIdent "=" Expr ;
 
 separator nonempty Item "," ;
 
-SAss.       Stmt ::= PIdent "=" Expr  ";" ;
+SAss.       Stmt ::= Ref "=" Expr  ";" ;
 
 SDIncr.      Stmt ::= PIdent TDIOp  ";" ;
 
@@ -76,6 +78,8 @@ SWhile.     Stmt ::= TWhile "(" Expr ")" Stmt ;
 
 SExp.       Stmt ::= Expr  ";" ;
 
+Decl.       Decl ::= Type [Item] ";" ;
+
 -- Types ---------------------------------------------------
 
 BIInt.      BinType ::= "int" ;
@@ -86,13 +90,15 @@ BIBool.     BinType ::= "boolean" ;
 
 BIVoid.     BinType ::= "void" ;
 
---CType.      ClassType ::= Ident ;
+CPType.      ClassType ::= PIdent ;
+
+internal CType.  ClassType ::= Ident ;
 
 --separator ClassType "," ;
 
 TBuiltIn.   TypeName    ::= BinType ;
 
---TClass.     TypeName    ::= ClassType ;
+TClass.     TypeName    ::= ClassType ;
 
 --TArray.    Type ::= Type "[]" ;
 
@@ -105,17 +111,17 @@ internal   TFun. Type ::= Type "(" [Type] ")" ;
 
 -- Classes -------------------------------------------------
 
---CDef.	ClassDef ::= "class" Ident ClassBody ;
+CDef.	ClassDef ::= "class" PIdent ClassBody ;
 
---CDefE.	ClassDef ::= "class" Ident "extends" [ClassType] ClassBody ;
+--CDefE.	ClassDef ::= "class" PIdent "extends" ClassType ClassBody ;
 
---CBody.  ClassBody ::=  "{" [FieldDecl] "}";
+CBody.  ClassBody ::=  "{" [FieldDecl] "}";
 
---CVar.   FieldDecl ::= Type [Item] ";" ;
+CVar.   FieldDecl ::= Type [PIdent] ";" ;
 
 --CMet.   FieldDecl ::= Type Ident "(" [Arg] ")" Block ;
 
---separator FieldDecl "" ;
+separator FieldDecl "" ;
 
 -- Expressions ---------------------------------------------
 
@@ -135,13 +141,21 @@ LString.   Literal ::= String ;
 
 --EAArr.     Expr7 ::= Expr7 "[" Expr "]" ;
 
-EVar.      Expr6 ::= PIdent ;
+NClass.    New ::= "new" PIdent ;
+
+RDot.      Ref  ::= PIdent "." PIdent ;
+
+RVar.      Ref ::= PIdent ;
+
+ENull.     Expr6  ::= Expr7 "null" ;
+
+ERef.      Expr6 ::= Ref ;
 
 ELit.      Expr6 ::= Literal ;
 
 EApp.      Expr6 ::= PIdent "(" [Expr] ")" ;
 
---ENew.      Expr6 ::= New ;
+ENew.      Expr6 ::= New ;
 
 EUnOp.     Expr5 ::= UnOp Expr6 ;
 
@@ -157,7 +171,7 @@ EOr.       Expr ::= Expr1 TLogOrOp Expr ;
 
 --coercions  Expr 7 ;
 
-coercions  Expr 6 ;
+coercions  Expr 7 ;
 
 separator  Expr "," ;
 
