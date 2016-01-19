@@ -21,13 +21,17 @@ classType x = TType $ TClass $ CType $ Ident x
 type Position = (Int, Int)
 
 type TypeInfo = (Type, Position, Int)
-
 type TypeEnv = Map.Map String TypeInfo
 emptyTypeEnv :: TypeEnv
 emptyTypeEnv = Map.empty
 
-type ClassEnv = Map.Map String ClassInfo
+type FunInfo = (Type, [Type], Position)
+type FunEnv = Map.Map String FunInfo
+emptyFunEnv:: FunEnv
+emptyFunEnv = Map.empty
+
 type ClassInfo = (Map.Map String (Type, Integer), Position)
+type ClassEnv = Map.Map String ClassInfo
 emptyClassEnv :: ClassEnv
 emptyClassEnv = Map.empty
 

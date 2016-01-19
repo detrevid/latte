@@ -12,12 +12,15 @@ data CBlock = CBlock [CStmt]
 data CItem = CINoInit CIdent | CIInit CIdent CTExpr
   deriving (Eq, Ord, Show, Read)
 
-type CProgramInfo = (CProgram, ClassEnv, TypeEnv)
+type CProgramInfo = (CProgram, ClassEnv, FunEnv)
 
 data CProgram = CProgram [CTopDef]
   deriving (Eq, Ord, Show, Read)
 
-data CTopDef = CTDFnDef Type CIdent [CArg] CBlock | CTDCDef CClassDef
+data CFunDef = CFunDef Type CIdent [CArg] CBlock
+  deriving (Eq, Ord, Show, Read)
+
+data CTopDef = CTDFnDef CFunDef | CTDCDef CClassDef
   deriving (Eq, Ord, Show, Read)
 
 data CClassDef = CCDef String CClassBody

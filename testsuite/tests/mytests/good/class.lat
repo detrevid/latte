@@ -4,7 +4,13 @@ class List {
   boolean b;
   string s;
   int zero;
+
+ int getX() { return this.x; }
 }
+
+int getX(List a) { return a.x; }
+
+int get2X(List a) { return a.getX(); }
 
 int main() {
   List a;
@@ -17,5 +23,7 @@ int main() {
   a.s = "GOOD";
   if (a.b) printString(a.s);
   printInt(a.zero);
+  a.x = 100;
+  printInt(a.getX());
   return 0;
 }

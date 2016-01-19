@@ -24,7 +24,10 @@ getFunDescFI :: FunctionInfo -> (Type, String, [(Type, String)])
 getFunDescFI fi = (functionReturnType fi, functionName fi, functionArguments fi)
 
 getBinFunTypeInfo :: FunctionInfo -> (String, TypeInfo)
-getBinFunTypeInfo fi = (functionName fi, ((getFunTypeFI fi), binpos, bidepth))
+getBinFunTypeInfo fi = (functionName fi, (getFunTypeFI fi, binpos, bidepth))
+
+getBinFunInfo :: FunctionInfo -> (String, FunInfo)
+getBinFunInfo fi = (functionName fi, (functionReturnType fi, getArgsTypesFI fi, binpos))
 
 printIntFI = FunctionInfo {
   functionName       = "printInt",
@@ -74,5 +77,10 @@ builtInsTypeInfos = map getBinFunTypeInfo builtIns
 
 builtInsDescs = map getFunDescFI builtIns
 
+bultInsFunInfos = map getBinFunInfo builtIns
+
 addBuiltInsToTypeEnv :: TypeEnv -> TypeEnv
 addBuiltInsToTypeEnv = flip Map.union $ Map.fromList builtInsTypeInfos
+
+addBuiltInsToFunEnv :: FunEnv -> FunEnv
+addBuiltInsToFunEnv = flip Map.union $ Map.fromList bultInsFunInfos

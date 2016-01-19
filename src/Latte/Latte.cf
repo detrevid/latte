@@ -4,7 +4,7 @@ entrypoints Program ;
 
 Program.   Program ::= [TopDef] ;
 
-TDFnDef.   TopDef ::= Type PIdent "(" [Arg] ")" Block ;
+TDFnDef.   TopDef ::= FunDef ;
 
 TDCDef.    TopDef ::= ClassDef ;
 
@@ -13,6 +13,8 @@ separator nonempty TopDef "" ;
 Arg. 	   Arg ::= Type PIdent;
 
 separator  Arg "," ;
+
+FunDef.    FunDef ::=  Type PIdent "(" [Arg] ")" Block ;
 
 -- Tokens --------------------------------------------------
 
@@ -119,11 +121,13 @@ CBody.  ClassBody ::=  "{" [FieldDecl] "}";
 
 CVar.   FieldDecl ::= Type [PIdent] ";" ;
 
---CMet.   FieldDecl ::= Type Ident "(" [Arg] ")" Block ;
+CMet.   FieldDecl ::= FunDef ;
 
 separator FieldDecl "" ;
 
 -- Expressions ---------------------------------------------
+
+FApp.     FApp ::= PIdent "(" [Expr] ")" ;
 
 LInt.      Literal ::= Integer ;
 
@@ -153,7 +157,9 @@ ERef.      Expr6 ::= Ref ;
 
 ELit.      Expr6 ::= Literal ;
 
-EApp.      Expr6 ::= PIdent "(" [Expr] ")" ;
+EMet.      Expr6 ::= PIdent "." FApp ;
+
+EApp.      Expr6 ::= FApp ;
 
 ENew.      Expr6 ::= New ;
 

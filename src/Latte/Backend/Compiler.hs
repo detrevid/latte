@@ -32,6 +32,7 @@ import qualified Data.Int as HInt
 import qualified Data.Traversable as Traversable
 import Debug.Trace
 import Control.Applicative (Applicative)
+import Data.Functor
 import Control.Monad.State
 import qualified Control.Monad.Except as Except
 
@@ -216,13 +217,11 @@ getFunRetType ident = do
     Just (rType, _)  -> return rType
     _ -> fail internalErrMsg
 
-typeInfoToFunInfo :: TypeInfo -> CompilerType (AST.Type, [AST.Type])
-typeInfoToFunInfo x = case x of
-  (TFun rType args, _, _) -> do
-    crType <- compileType rType
-    cargs <- mapM compileType args
-    return (crType, cargs)
-  _ -> fail internalErrMsg
+typeInfoToFunInfo :: FunInfo -> CompilerType (AST.Type, [AST.Type])
+typeInfoToFunInfo (rType, args, _) = do
+  crType <- compileType rType
+  cargs <- mapM compileType args
+  return (crType, cargs)
 
 getNewNr' :: CompilerState -> (Int, CompilerState)
 getNewNr' s =
@@ -469,31 +468,34 @@ compileCProgram :: String -> CProgramInfo -> Err AST.Module
 compileCProgram pname prog = runCompilerType $ compileCProgram' pname prog
 
 compileCProgram' :: String -> CProgramInfo -> CompilerType AST.Module
-compileCProgram' pname (CProgram topdefs, cenv, ftenv) = do
+compileCProgram' pname (CProgram topdefs, cenv, fenv) = do
   funenv <- fmap Map.fromList $ mapM (\(ident, tinfo) -> do
     funinfo <- typeInfoToFunInfo tinfo
-    return (ident, funinfo)) $ Map.toList ftenv
+    return (ident, funinfo)) $ Map.toList fenv
   modify $ \s -> s { glFunTypeEnv = Map.union funenv additionalCDeclsEnv, classEnv = cenv }
   decls <- funDeclForBuiltIns
   defs <- mapM compileCTopDef topdefs
   strConstDefs <- getStrConstDefs
   return $ newModule pname (strConstDefs ++ decls ++ additionalCDecls ++ defs)
 
+compileCFunDef :: CFunDef -> CompilerType AST.Definition
+compileCFunDef (CFunDef tret ident args block) = do
+  resetCompilerState
+  newCurrentBlock
+  tret' <- compileType tret
+  let fname = Name ident
+  params <- mapM (\(CArg atype aid) -> do
+    atype' <- compileType atype
+    let aname = Name aid
+    return $ Parameter atype' aname []) args
+  mapM_ (\(Parameter atype aname _) -> allocAndStore atype aname (LocalReference atype aname)) params
+  compileCBlock block
+  bblocks <- getBasicBlocks
+  return $ newGlobalFunctionDef tret' fname params bblocks
+
 compileCTopDef :: CTopDef -> CompilerType AST.Definition
 compileCTopDef x = case x of
-  CTDFnDef tret ident args block -> do
-    resetCompilerState
-    newCurrentBlock
-    tret' <- compileType tret
-    let fname = Name ident
-    params <- mapM (\(CArg atype aid) -> do
-      atype' <- compileType atype
-      let aname = Name aid
-      return $ Parameter atype' aname []) args
-    mapM_ (\(Parameter atype aname _) -> allocAndStore atype aname (LocalReference atype aname)) params
-    compileCBlock block
-    bblocks <- getBasicBlocks
-    return $ newGlobalFunctionDef tret' fname params bblocks
+  CTDFnDef fdef -> compileCFunDef fdef
   CTDCDef (CCDef id (CCBody decls)) -> do
     elemTypes <- mapM (\decl -> case decl of
                             CCVar t pidents -> do
