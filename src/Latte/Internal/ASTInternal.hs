@@ -23,11 +23,13 @@ data CFunDef = CFunDef Type CIdent [CArg] CBlock
 data CTopDef = CTDFnDef CFunDef | CTDCDef CClassDef
   deriving (Eq, Ord, Show, Read)
 
-data CClassDef = CCDef String CClassBody
+data CClassDef = CCDef String (Maybe String) CClassBody
   deriving (Eq, Ord, Show, Read)
 
 data CClassBody = CCBody [CFieldDecl]
   deriving (Eq, Ord, Show, Read)
+
+emptyBody = CCBody []
 
 data CFieldDecl = CCVar Type [CIdent]
   deriving (Eq, Ord, Show, Read)
@@ -59,7 +61,7 @@ data CNew = CNClass CIdent
 
 type CTRef = (CRef, Type)
 
-data CRef = CRDot CIdent Integer | CRVar CIdent
+data CRef = CRDot CIdent Integer CIdent | CRVar CIdent
   deriving (Eq, Ord, Show, Read)
 
 type CTExpr = (CExpr, Type)

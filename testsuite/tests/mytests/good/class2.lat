@@ -1,0 +1,23 @@
+class A {
+  int x;
+  int getX() { return this.x; }
+}
+
+class B extends A {
+  int y;
+}
+
+int main() {
+  A a;
+  B b;
+  a = new B;
+  b = new B;
+  a.x = 10;
+  b.x = 20;
+  b.y = 30;
+  printInt(a.x);
+  printInt(b.x);
+  printInt(b.y);
+  printInt(a.getX());
+  return 0;
+}

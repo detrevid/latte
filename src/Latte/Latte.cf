@@ -115,7 +115,7 @@ internal   TFun. Type ::= Type "(" [Type] ")" ;
 
 CDef.	ClassDef ::= "class" PIdent ClassBody ;
 
---CDefE.	ClassDef ::= "class" PIdent "extends" ClassType ClassBody ;
+CDefE.	ClassDef ::= "class" PIdent "extends" PIdent ClassBody ;
 
 CBody.  ClassBody ::=  "{" [FieldDecl] "}";
 

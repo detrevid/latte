@@ -23,13 +23,13 @@ import LLVM.General.AST.Type
 import LLVM.General.Context
 import LLVM.General.Module
 
-import Control.Conditional
-import qualified Control.Conditional as Cond
+import Control.Conditional (unlessM)
+import Control.Lens.Tuple
+import Control.Lens ((^.))
 import qualified Data.Map as Map
 import Data.Char
 import Data.Maybe
 import qualified Data.Int as HInt
-import qualified Data.Traversable as Traversable
 import Debug.Trace
 import Control.Applicative (Applicative)
 import Data.Functor
@@ -336,9 +336,12 @@ compileType (TType x) = case x of
   TBuiltIn BIVoid -> return VoidType
   TBuiltIn BIBool -> return boolType
   TBuiltIn BIStr -> return stringType
-  TClass (CType (Ident id)) -> return $ PointerType (NamedTypeReference $ className id) defaultAddrSpace
+  TClass (CType (Ident id)) -> return $ PointerType (classTypeRef id) defaultAddrSpace
   _ -> fail internalErrMsg
 compileType _ = fail internalErrMsg
+
+classTypeRef :: String -> AST.Type
+classTypeRef classId = NamedTypeReference $ className classId
 
 bitsInByte = 4
 
@@ -354,7 +357,7 @@ typeBytes _ = 0
 classBytes :: String -> CompilerType Integer
 classBytes ident = do
   cinfo <- getClassInfo ident
-  let fieldsTypes = map fst $ Map.elems $ fst cinfo
+  let fieldsTypes = map (^._1) $ Map.elems $ classFields cinfo
       fieldsBytes = map typeBytes fieldsTypes
   return $ sum fieldsBytes
 
@@ -377,7 +380,6 @@ getCharConstOper c = ConstantOperand $ getCharConst c-}
 defaultIntVal = intConstOper 0
 defaultBoolVal = getBoolConstOper False
 
---TODO remove maybe
 defaultValue :: ABS.Type -> CompilerType AST.Operand
 defaultValue (TType x) = case x of
   TBuiltIn BIInt  -> return defaultIntVal
@@ -457,6 +459,11 @@ zext oper t = nameInstruction t $ AST.ZExt oper t []
 bitcast :: AST.Operand -> AST.Type -> CompilerType AST.Operand
 bitcast oper t = nameInstruction t $ AST.BitCast oper t []
 
+bitcastClass :: AST.Operand -> String -> CompilerType AST.Operand
+bitcastClass address tclassId = do
+  t <- compileType $ classType tclassId
+  bitcast address t
+
 compileModuleToLLVM :: AST.Module -> IO (Err String)
 compileModuleToLLVM mod = withContext $ \context ->
   Except.runExceptT >=> either (return . Bad) (return . Ok) $
@@ -496,13 +503,14 @@ compileCFunDef (CFunDef tret ident args block) = do
 compileCTopDef :: CTopDef -> CompilerType AST.Definition
 compileCTopDef x = case x of
   CTDFnDef fdef -> compileCFunDef fdef
-  CTDCDef (CCDef id (CCBody decls)) -> do
-    elemTypes <- mapM (\decl -> case decl of
-                            CCVar t pidents -> do
-                              t' <- compileType t
-                              return $ replicate (length pidents) t') decls
-    let elemTypes' = concat elemTypes
-    return $ TypeDefinition (className id) (Just $ StructureType False elemTypes')
+  CTDCDef (CCDef classId superClass (CCBody decls)) -> do
+    elemTypes <- concat <$> mapM (\decl -> case decl of
+                                    CCVar t pidents -> do
+                                      t' <- compileType t
+                                      return $ replicate (length pidents) t') decls
+    let scref = maybe [] (\x -> [classTypeRef x]) superClass
+        elemTypes' = scref ++ elemTypes
+    return $ TypeDefinition (className classId) (Just $ StructureType False elemTypes')
 
 compileCBlock :: CBlock -> CompilerType ()
 compileCBlock (CBlock stmts) = do
@@ -537,7 +545,7 @@ compileCStmt x = case x of
     setUnBlockTerminator afterCondLabel $ condbr val' trueLabel falseLabel
     termAfterTrue <- isBlockTerminated afterTrue
     termAfterFalse <- isBlockTerminated afterFalse
-    Cond.when (not $ termAfterTrue && termAfterFalse) (do
+    when (not $ termAfterTrue && termAfterFalse) (do
       afterIfLabel <- newCurrentBlock
       setUnBlockTerminator afterTrue $ br afterIfLabel
       setUnBlockTerminator afterFalse $ br afterIfLabel
@@ -576,7 +584,13 @@ compileCDecl (CDecl t items) = do
         ) items
 
 compileCExpr :: CTExpr -> CompilerType AST.Operand
-compileCExpr (x, tx) = case x of
+compileCExpr expr@(_, texpr) = do
+  ctexpr <- compileType texpr
+  oper <- compileCExpr' expr
+  bitcast oper ctexpr
+
+compileCExpr' :: CTExpr -> CompilerType AST.Operand
+compileCExpr' (x, tx) = case x of
   CERef ref -> do
     oper <- compileCRef ref tx
     load oper
@@ -601,13 +615,13 @@ compileCExpr (x, tx) = case x of
     return $ ConstantOperand $ Null ct
 
 initClass :: String -> AST.Operand -> CompilerType ()
-initClass ident address = do
-  (fields, _) <- getClassInfo ident
-  Traversable.mapM (\(t, i) -> do
-    field <- getField address t i
+initClass classId address = do
+  cinfo <- getClassInfo classId
+  mapM_ (\(t, i, sc) -> do
+    oper <- bitcastClass address sc
+    field <- getField oper t i
     val <- defaultValue t
-    store field val) fields
-  return ()
+    store field val) $ Map.elems $ classFields cinfo
 
 getField :: AST.Operand -> ABS.Type -> Integer -> CompilerType AST.Operand
 getField address t fieldIndex = do
@@ -617,9 +631,10 @@ getField address t fieldIndex = do
 compileCRef :: CRef -> ABS.Type -> CompilerType AST.Operand
 compileCRef x tx = case x of
   CRVar ident -> lookupEnv (Name ident)
-  CRDot varid fieldIndex -> do
+  CRDot varid fieldIndex fieldClass -> do
     oper <- loadVar varid
-    getField oper tx fieldIndex
+    oper' <- bitcastClass oper fieldClass
+    getField oper' tx fieldIndex
 
 binOprs :: Map.Map String (Operand -> Operand -> InstructionMetadata -> Instruction)
 binOprs = Map.fromList [

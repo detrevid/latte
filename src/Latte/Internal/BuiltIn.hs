@@ -2,6 +2,7 @@ module Latte.Internal.BuiltIn where
 
 import Latte.BNFC.AbsLatte
 import Latte.Internal.Type
+import Latte.Internal.ASTInternal
 
 import qualified Data.Map as Map
 
@@ -79,8 +80,19 @@ builtInsDescs = map getFunDescFI builtIns
 
 bultInsFunInfos = map getBinFunInfo builtIns
 
-addBuiltInsToTypeEnv :: TypeEnv -> TypeEnv
-addBuiltInsToTypeEnv = flip Map.union $ Map.fromList builtInsTypeInfos
-
 addBuiltInsToFunEnv :: FunEnv -> FunEnv
 addBuiltInsToFunEnv = flip Map.union $ Map.fromList bultInsFunInfos
+
+objectClassId = "Object"
+objectClassPId = PIdent(binpos, objectClassId)
+objectClass = CTDCDef $ CCDef objectClassId objectSuperClass emptyBody
+objectSuperClass = Nothing
+objectClassInfo = defaultClassInfo {
+  classDeclPos     = binpos
+}
+
+builtInsClassesDefs = [objectClass]
+builtInsClassEnv = [(objectClassId, objectClassInfo)]
+
+addBuiltInsToClassEnv :: ClassEnv -> ClassEnv
+addBuiltInsToClassEnv = flip Map.union $ Map.fromList builtInsClassEnv
