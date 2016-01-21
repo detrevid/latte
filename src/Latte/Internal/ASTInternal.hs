@@ -42,7 +42,7 @@ data CStmt
     | CSBlock CBlock
     | CSDecl CDecl
     | CSAss CTRef CTExpr
-    | CSRet CTExpr
+    | CSRet Type CTExpr
     | CSVRet
     | CSCondElse CTExpr CStmt CStmt
     | CSWhile CTExpr CStmt
@@ -70,6 +70,7 @@ data CExpr
     = CERef CRef
     | CELit CLiteral
     | CEApp CIdent [CTExpr]
+    | CEMet CIdent Int [CTExpr]
     | CBinOp CTExpr COperator CTExpr
     | CENew CNew
     | CENull Type

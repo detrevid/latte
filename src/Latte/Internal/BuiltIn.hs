@@ -9,70 +9,84 @@ import qualified Data.Map as Map
 binpos = (-1,-1)
 bidepth = 0
 
-data FunctionInfo = FunctionInfo {
-  functionName       :: String,
-  functionReturnType :: Type,
-  functionArguments  :: [(Type, String)]
-  } deriving (Show)
-
-getArgsTypesFI :: FunctionInfo -> [Type]
-getArgsTypesFI fi = map fst (functionArguments fi)
-
 getFunTypeFI :: FunctionInfo -> Type
-getFunTypeFI fi = TFun (functionReturnType fi) (getArgsTypesFI fi)
+getFunTypeFI fi = TFun (functionReturnType fi) (functionArgsTypes fi)
 
 getFunDescFI :: FunctionInfo -> (Type, String, [(Type, String)])
-getFunDescFI fi = (functionReturnType fi, functionName fi, functionArguments fi)
+getFunDescFI fi = (functionReturnType fi, functionName fi, functionArgs fi)
 
 getBinFunTypeInfo :: FunctionInfo -> (String, TypeInfo)
 getBinFunTypeInfo fi = (functionName fi, (getFunTypeFI fi, binpos, bidepth))
 
-getBinFunInfo :: FunctionInfo -> (String, FunInfo)
-getBinFunInfo fi = (functionName fi, (functionReturnType fi, getArgsTypesFI fi, binpos))
+getBinFunInfo :: FunctionInfo -> (String, FunctionInfo)
+getBinFunInfo fi = (functionName fi, fi)
 
 printIntFI = FunctionInfo {
   functionName       = "printInt",
   functionReturnType = typeVoid,
-  functionArguments  = [(typeInt, "x")]
+  functionArgs  = [(typeInt, "x")],
+  functionArgsTypes  = [typeInt],
+  functionDeclPos = binpos
 }
 
 printStringFI = FunctionInfo {
   functionName       = "printString",
   functionReturnType = typeVoid,
-  functionArguments  = [(typeString, "s")]
+  functionArgs  = [(typeString, "s")],
+  functionArgsTypes = [typeString],
+  functionDeclPos = binpos
 }
 
 errorFI = FunctionInfo {
   functionName       = "error",
   functionReturnType = typeVoid,
-  functionArguments  = []
+  functionArgs  = [],
+  functionArgsTypes = [],
+  functionDeclPos = binpos
 }
 
 readIntFI = FunctionInfo {
   functionName       = "readInt",
   functionReturnType = typeInt,
-  functionArguments  = []
+  functionArgs  = [],
+  functionArgsTypes = [],
+  functionDeclPos = binpos
 }
 
 readStringFI = FunctionInfo {
   functionName       = "readString",
   functionReturnType = typeString,
-  functionArguments  = []
+  functionArgs  = [],
+  functionArgsTypes = [],
+  functionDeclPos = binpos
 }
 
 concatStringFI = FunctionInfo {
   functionName       = "concatString",
   functionReturnType = typeString,
-  functionArguments  = [(typeString, "str1"), (typeString, "str2")]
+  functionArgs  = [(typeString, "str1"), (typeString, "str2")],
+  functionArgsTypes = [typeString, typeString],
+  functionDeclPos = binpos
 }
 
 equalsStringFI = FunctionInfo {
   functionName       = "equalsString",
   functionReturnType = typeBool,
-  functionArguments  = [(typeString, "str1"), (typeString, "str2")]
+  functionArgs  = [(typeString, "str1"), (typeString, "str2")],
+  functionArgsTypes = [typeString, typeString],
+  functionDeclPos = binpos
 }
 
-builtIns = [printIntFI,  printStringFI, errorFI, readIntFI, readStringFI, concatStringFI, equalsStringFI]
+--TODO think about it  - should malloc return type be a string?
+mallocFI = FunctionInfo {
+  functionName       = "malloc",
+  functionReturnType = typeString,
+  functionArgs  = [(typeInt, "x")],
+  functionArgsTypes = [typeInt],
+  functionDeclPos = binpos
+}
+
+builtIns = [printIntFI,  printStringFI, errorFI, readIntFI, readStringFI, concatStringFI, equalsStringFI, mallocFI]
 
 builtInsTypeInfos = map getBinFunTypeInfo builtIns
 
@@ -83,12 +97,12 @@ bultInsFunInfos = map getBinFunInfo builtIns
 addBuiltInsToFunEnv :: FunEnv -> FunEnv
 addBuiltInsToFunEnv = flip Map.union $ Map.fromList bultInsFunInfos
 
-objectClassId = "Object"
+objectClassId = "NothingObject"
 objectClassPId = PIdent(binpos, objectClassId)
 objectClass = CTDCDef $ CCDef objectClassId objectSuperClass emptyBody
 objectSuperClass = Nothing
 objectClassInfo = defaultClassInfo {
-  classDeclPos     = binpos
+  classDeclPos = binpos
 }
 
 builtInsClassesDefs = [objectClass]
@@ -96,3 +110,5 @@ builtInsClassEnv = [(objectClassId, objectClassInfo)]
 
 addBuiltInsToClassEnv :: ClassEnv -> ClassEnv
 addBuiltInsToClassEnv = flip Map.union $ Map.fromList builtInsClassEnv
+
+thisId = "this"

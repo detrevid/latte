@@ -64,7 +64,7 @@ separator nonempty Item "," ;
 
 SAss.       Stmt ::= Ref "=" Expr  ";" ;
 
-SDIncr.      Stmt ::= PIdent TDIOp  ";" ;
+SDIncr.      Stmt ::= Ref TDIOp  ";" ;
 
 SRet.       Stmt ::= TRet Expr ";" ;
 
@@ -174,8 +174,6 @@ ERel.      Expr2 ::= Expr2 TRelOp Expr3 ;
 EAnd.      Expr1 ::= Expr2 TLogAndOp Expr1 ;
 
 EOr.       Expr ::= Expr1 TLogOrOp Expr ;
-
---coercions  Expr 7 ;
 
 coercions  Expr 7 ;
 

@@ -54,10 +54,10 @@ getEnv = gets typeEnv
 addToEnv :: String -> TypeInfo -> CheckerType ()
 addToEnv ident t = modify $ (\s -> s { typeEnv = Map.insert ident t $ typeEnv s })
 
-addToFunEnv :: String -> FunInfo -> CheckerType ()
+addToFunEnv :: String -> FunctionInfo -> CheckerType ()
 addToFunEnv ident fi = modify $ (\s -> s { funEnv = Map.insert ident fi $ funEnv s })
 
-lookupFunEnv :: PIdent -> CheckerType FunInfo
+lookupFunEnv :: PIdent -> CheckerType FunctionInfo
 lookupFunEnv (PIdent (pos, ident)) = maybe (fail $ undecError pos ident) return =<< Map.lookup ident <$> gets funEnv
 
 {-
@@ -94,6 +94,11 @@ getClassInfo (PIdent (pos, ident)) = do
   mci <- gets $ (Map.lookup ident) . classEnv
   maybe (fail $ unknownTypeError pos t) return mci
 
+getClassInfoIn :: String -> CheckerType ClassInfo
+getClassInfoIn classId = do
+  mci <- gets $ (Map.lookup classId) . classEnv
+  maybe (fail internalErrMsg) return mci
+
 typeError :: Position -> String -> Maybe Expr -> Maybe Type -> Type -> String
 typeError pos errMsg mexpr mtexpected tfound  =
   "Type Error\n" ++
@@ -123,14 +128,14 @@ checkTypes' prog@(Program topdefs) = do
   ctopdefs <- concat <$> mapM checkTypesTopDef topdefs
   cenv <- gets classEnv
   fenv <- gets funEnv
-  return $ (CProgram $ builtInsClassesDefs ++ ctopdefs, cenv, fenv)
+  return $ (CProgram $ ctopdefs, cenv, fenv)
 
 checkTypes :: Program -> Err CProgramInfo
 checkTypes prog = runCheckerType $ checkTypes' prog
 
 addThisArgToFun :: PIdent -> FunDef -> CheckerType FunDef
 addThisArgToFun classPId (FunDef tret mpid@(PIdent (mpos, _)) args block) = do
-  let args' = (Arg (TType (TClass (CPType classPId))) (PIdent (mpos, "this"))) : args
+  let args' = (Arg (TType (TClass (CPType classPId))) (PIdent (mpos, thisId))) : args
   return $ FunDef tret mpid args' block
 
 makeFunNameFromMet :: String -> String -> String
@@ -148,7 +153,7 @@ addTopDefToEnv tdef = case tdef of
     case mt of
       Nothing -> do
         let targs = map (\(Arg t _) -> removePosFromType t) args
-        addToFunEnv id (removePosFromType tret, targs, pos)
+        addToFunEnv id $ FunctionInfo id (removePosFromType tret) [] targs pos
       Just (_, decPos, _) -> fail $ redecError pos id decPos
   TDCDef (CDef pid body) -> addTopDefToEnv $ TDCDef (CDefE pid objectClassPId body)
   TDCDef (CDefE pid@(PIdent (pos, classId)) (PIdent (_, superClassId)) (CBody fdecls)) -> do
@@ -159,11 +164,17 @@ addTopDefToEnv tdef = case tdef of
                        \fdecl -> case fdecl of
                          CVar t idents -> map (\(PIdent (_, ident)) -> (ident, t)) idents
                          _ -> []) fdecls) [1..]
-            classInfo = ClassInfo fields (Just superClassId) [] pos
-        mapM_ (\fdecl -> case fdecl of
-                 CVar _ _ -> return ()
-                 CMet fdef -> addTopDefToEnv =<< TDFnDef <$> methodToFun pid fdef
+        menv <- fmap (Map.fromList . concat) $ mapM (\fdecl -> case fdecl of
+                 CVar _ _ -> return []
+                 CMet fdef@(FunDef tret (PIdent (pos, metId)) args _) -> do
+                   addTopDefToEnv =<< TDFnDef <$> methodToFun pid fdef
+                   let targs = map (\(Arg t _) -> removePosFromType t) args
+                   return [(metId, FunctionInfo (makeFunNameFromMet classId metId) (removePosFromType tret) [] targs pos)]
                   ) fdecls
+        let classInfo = defaultClassInfo { classFields = fields,
+          classSuperClass = (Just superClassId),
+          classDeclPos = pos,
+          classMethods = menv }
         modify (\s -> s { classEnv = Map.insert classId classInfo $ classEnv s })
       Just cinfo -> fail $ redecError pos classId $ classDeclPos cinfo
 
@@ -172,6 +183,7 @@ addTopDefsToEnv (Program tdefs) = do
   mapM_ addTopDefToEnv tdefs
   computeSubclasses
   computeAllDerivedFieldsInClasses
+  computeAllDerivedMethodsInClasses
 
 removePosFromType :: Type -> Type
 removePosFromType t = case t of
@@ -237,8 +249,7 @@ checkTypesTopDef tdef = case tdef of
 
 addSubclass :: String -> String -> CheckerType ()
 addSubclass classId subClassId = do
-  mci <- gets $ (Map.lookup classId) . classEnv
-  cinf <- maybe (fail internalErrMsg) return mci
+  cinf <- getClassInfoIn classId
   let subClasses' = subClassId : (classSubClasses cinf)
       cinf' = cinf { classSubClasses = subClasses' }
   modify $ \s -> s { classEnv = Map.update (const $ Just cinf') classId $ classEnv s }
@@ -251,8 +262,7 @@ computeSubclasses = do
 
 computeAllDerivedFieldsInClasses' :: ClassFieldEnv -> String -> CheckerType ()
 computeAllDerivedFieldsInClasses' dfields classId = do
-  mci <- gets $ (Map.lookup classId) . classEnv
-  cinf <- maybe (fail internalErrMsg) return mci
+  cinf <- getClassInfoIn classId
   let dfields' =  Map.union dfields $ classFields cinf
       cinf' = cinf { classFields = dfields' }
   modify $ \s -> s { classEnv = Map.update (const $ Just cinf') classId $ classEnv s }
@@ -260,6 +270,17 @@ computeAllDerivedFieldsInClasses' dfields classId = do
 
 computeAllDerivedFieldsInClasses :: CheckerType ()
 computeAllDerivedFieldsInClasses = computeAllDerivedFieldsInClasses' emptyClassFieldEnv objectClassId
+
+computeAllDerivedMethodsInClasses' :: FunEnv -> String -> CheckerType ()
+computeAllDerivedMethodsInClasses' dmethods classId = do
+  cinf <- getClassInfoIn classId
+  let dmethods' =  Map.union dmethods $ classMethods cinf
+      cinf' = cinf { classMethods = dmethods' }
+  modify $ \s -> s { classEnv = Map.update (const $ Just cinf') classId $ classEnv s }
+  mapM_ (computeAllDerivedMethodsInClasses' dmethods') $ classSubClasses cinf'
+
+computeAllDerivedMethodsInClasses :: CheckerType ()
+computeAllDerivedMethodsInClasses = computeAllDerivedMethodsInClasses' emptyFunEnv objectClassId
 
 checkTypesBlock :: Block -> CheckerType (Type, CBlock)
 checkTypesBlock (Block stmts) = do
@@ -292,17 +313,17 @@ checkTypesStmt x = case x of
     (texpr, cexpr) <- checkTypesExpr expr
     --TODO write get pos
     unlessM (compareTypes t texpr) (fail $ typeError (0, 0) "Bad expression type after assignment sign." (Just expr) (Just t) texpr)
-    return (typeVoid, CSAss (cref, t) (setType t cexpr))
-  SDIncr pid@(PIdent (pos, ident)) (TDIOp (_, opr)) -> do
-    (t, _, _) <- lookupVarTypeEnv pid
+    return (typeVoid, CSAss (cref, t) cexpr)
+  SDIncr ref (TDIOp (pos, opr)) -> do
+    (t, cref) <- checkTypesRef ref
     let opr' = if opr == "++" then "+" else "-"
-    when (t /= typeInt) $ fail $ typeError pos ("Variable " ++ ident ++ ".") Nothing (Just typeInt)  t
-    return (typeVoid, (CSAss ((CRVar ident), t) ((CBinOp ((CERef (CRVar ident)), t) opr' ((CELit (CLInt 1)), typeInt)), typeInt)))
+    when (t /= typeInt) $ fail $ typeError pos ("Operator " ++ opr ++ " applied to reference of wrong type.") Nothing (Just typeInt)  t
+    return (typeVoid, (CSAss (cref, t) ((CBinOp ((CERef cref), t) opr' ((CELit (CLInt 1)), typeInt)), typeInt)))
   SRet (TRet (pos, _)) expr -> do
     (texpr, cexpr) <- checkTypesExpr expr
     exRetType <- gets expectedRetType
     unlessM (compareTypes exRetType texpr) (fail $ typeError pos "Bad return type." (Just expr) (Just exRetType) texpr)
-    return (texpr, CSRet $ setType exRetType cexpr)
+    return (texpr, CSRet exRetType cexpr)
   SVRet (TRet (pos, _)) -> do
     exRetType <- gets expectedRetType
     unlessM (compareTypes exRetType typeVoid) (fail $ typeError pos "Bad return type." Nothing (Just exRetType) typeVoid)
@@ -363,7 +384,7 @@ checkTypesDecl (Decl t items) = do
       (texp, cexp) <- checkTypesExpr exp
       unlessM (compareTypes t' texp) $ fail $ typeError pos ("Initialization of variable " ++ show id ++ ".") (Just exp) (Just t') texp
       addToEnv id (t', pos, depth)
-      return $ CIInit id $ setType t' cexp
+      return $ CIInit id cexp
         ) items
   return $ CDecl t' citems
 
@@ -372,9 +393,6 @@ checkTypesExpr expr = do
   (t, cexpr) <- checkTypesExpr' expr
   cexpr' <- CheckerType $ lift $ constantFolding cexpr
   return (t, cexpr')
-
-setType :: Type -> CTExpr -> CTExpr
-setType t (x, _) = (x, t)
 
 checkTypesExpr' :: Expr -> CheckerType (Type, CTExpr)
 checkTypesExpr' x = case x of
@@ -387,7 +405,7 @@ checkTypesExpr' x = case x of
     LFalse      -> return (typeBool, (CELit (CLBool False), typeBool))
     LString str -> return (typeString, (CELit (CLString str), typeString))
   EApp (FApp pid@(PIdent (pos, ident)) exps) -> do
-    (treturn, targs, decPos) <- lookupFunEnv pid
+    FunctionInfo _ treturn _ targs decPos <- lookupFunEnv pid
     (texps, cexs) <- unzip <$> mapM (checkTypesExpr) exps
     when (length targs /= length texps) (fail $ "Type Error\n" ++ show pos ++ "\nFunction " ++ ident ++
       " declared at " ++ show decPos ++ " used with bad number of arguments." ++ "\nNumber expected: " ++
@@ -453,13 +471,16 @@ checkTypesExpr' x = case x of
       let t' = classType ident
       return (t', (CENull t', t'))
     _ -> fail $ "Expression is not a type." --TODO add position
-  EMet varId (FApp (PIdent (mpos, mid)) mexps) -> do
-    classId <- getVarClassId varId
-    let fname = makeFunNameFromMet classId mid
-        thisExp = ERef $ RVar varId
+  EMet varPId@(PIdent (_, varId)) (FApp (PIdent (mpos, mid)) mexps) -> do
+    classId <- getVarClassId varPId
+    let thisExp = ERef $ RVar varPId
         mexps' = thisExp : mexps
-    --TODO maybe better msg if method does not exist
-    checkTypesExpr $ EApp $ FApp (PIdent (mpos, fname)) mexps'
+    cinf <- getClassInfoIn classId
+    metinf <- maybe (fail $ undecError mpos mid) return $ Map.lookup mid $ classMethods cinf
+    (_, (CEApp _ cexprs, _)) <- checkTypesExpr $ EApp $ FApp (PIdent (mpos, functionName metinf)) mexps'
+    let mmeti = Map.lookupIndex mid $ classMethods cinf
+    meti <- maybe (fail $ internalErrMsg) return mmeti
+    return (functionReturnType metinf, (CEMet varId meti cexprs, functionReturnType metinf))
 
 getVarClassId :: PIdent -> CheckerType String
 getVarClassId varPId@(PIdent (varPos, _)) = do
@@ -468,29 +489,30 @@ getVarClassId varPId@(PIdent (varPos, _)) = do
     TType (TClass (CType (Ident classId))) -> return classId
     _ -> fail $ typeError varPos "Dot operator applied to forbbiden type." Nothing Nothing t
 
---TODO remove unnecessary search
 getClassField :: String -> PIdent -> CheckerType ClassFieldInfo
-getClassField classId fieldPId@(PIdent (fieldPos, fieldId)) = do
-  mci <- gets $ (Map.lookup classId) . classEnv
-  ClassInfo fields superClass _ declClassPos <- maybe (fail internalErrMsg) return mci
-  let mf = Map.lookup fieldId fields
-  case mf of
-    Nothing  -> do
-      case superClass of
-        Nothing -> fail $ show fieldPos ++ "\nClass " ++ classId ++ " declared at " ++ show declClassPos ++
-                " does not have filed named " ++ fieldId ++ ".\n"
-        Just superClassId -> getClassField superClassId fieldPId
-    Just cfi -> return $ cfi
+getClassField classId (PIdent (fieldPos, fieldId)) = do
+  cinf <- getClassInfoIn classId
+  maybe (fail $ show fieldPos ++ "\nClass " ++ classId ++ " declared at " ++ show (classDeclPos cinf) ++
+    " does not have filed named " ++ fieldId ++ ".\n") return $ Map.lookup fieldId $ classFields cinf
 
 checkTypesRef :: Ref -> CheckerType (Type, CRef)
 checkTypesRef x = case x of
-  RDot varPid@(PIdent (_, varIdent)) fieldPId -> do
-    classId <- getVarClassId varPid
+  RDot varPId@(PIdent (_, varId)) fieldPId -> do
+    classId <- getVarClassId varPId
     (ftype, i, fclass) <- getClassField classId fieldPId
-    return (ftype, CRDot varIdent i fclass)
-  RVar pid@(PIdent (_, ident)) -> do
-    (t, _, _) <- lookupVarTypeEnv pid
-    return (t, CRVar ident)
+    return (ftype, CRDot varId i fclass)
+  RVar varPId@(PIdent (varPos, varId)) -> do
+    env <- getEnv
+    let mti = Map.lookup varId env
+    case mti of
+     Just (t, _, _) -> do
+       lookupVarTypeEnv varPId
+       return (t, CRVar varId)
+     Nothing -> do
+       let mthis = Map.lookup thisId env
+       case mthis of
+         Just (_, decPos, _) -> checkTypesRef $ RDot (PIdent (decPos, thisId)) varPId
+         _ -> fail $ undecError varPos varId
 
 checkTypesBinOp :: (Position, String) -> Expr -> Expr -> Type -> Type -> CheckerType (Type, CTExpr)
 checkTypesBinOp (pos, opr) expl expr eType rtype = do
@@ -500,12 +522,11 @@ checkTypesBinOp (pos, opr) expl expr eType rtype = do
   (texpr, cexpr) <- checkTypesExpr expr
   unlessM (compareTypes eType texpr) $ fail $ typeError pos ("Binary operator " ++ show opr ++
        " applied to an expression.") (Just expr) (Just eType) texpr
-  return (rtype, (CBinOp (setType eType cexpl) opr (setType eType cexpr), rtype))
+  return (rtype, (CBinOp cexpl opr cexpr, rtype))
 
 isSuperclass :: String -> String -> CheckerType Bool
 isSuperclass x y = do
-  mci <- gets $ (Map.lookup y) . classEnv
-  cinf <- maybe (fail internalErrMsg) return mci
+  cinf <- getClassInfoIn y
   maybe (return False) (\z -> if z == x then return True else isSuperclass x z) $ classSuperClass cinf
 
 isSubclass :: String -> String -> CheckerType Bool

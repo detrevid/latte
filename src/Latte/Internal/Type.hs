@@ -26,8 +26,17 @@ type TypeEnv = Map.Map String TypeInfo
 emptyTypeEnv :: TypeEnv
 emptyTypeEnv = Map.empty
 
-type FunInfo = (Type, [Type], Position)
-type FunEnv = Map.Map String FunInfo
+
+data FunctionInfo = FunctionInfo {
+  functionName       :: String,
+  functionReturnType :: Type,
+  functionArgs       :: [(Type, String)],
+  functionArgsTypes  :: [Type],
+  functionDeclPos    :: Position
+  } deriving (Eq, Ord, Show, Read)
+defaultFunctionInfo = FunctionInfo "" typeVoid [] []
+
+type FunEnv = Map.Map String FunctionInfo
 emptyFunEnv :: FunEnv
 emptyFunEnv = Map.empty
 
@@ -37,11 +46,12 @@ emptyClassFieldEnv = Map.empty
 
 data ClassInfo = ClassInfo {
   classFields     :: ClassFieldEnv,
+  classMethods    :: FunEnv,
   classSuperClass :: Maybe String,
   classSubClasses :: [String],
   classDeclPos    :: Position
   } deriving (Eq, Ord, Show, Read)
-defaultClassInfo = ClassInfo Map.empty Nothing [] (0, 0)
+defaultClassInfo = ClassInfo Map.empty emptyFunEnv Nothing [] (0, 0)
 type ClassEnv = Map.Map String ClassInfo
 emptyClassEnv :: ClassEnv
 emptyClassEnv = Map.empty

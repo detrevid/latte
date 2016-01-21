@@ -12,9 +12,9 @@ import Latte.Internal.ASTInternal
 import LLVM.General.AST
 import qualified LLVM.General.AST as AST
 import qualified LLVM.General.AST.Instruction as Instruction
-import LLVM.General.AST.AddrSpace
 import qualified LLVM.General.AST.CallingConvention as CallConv
 import LLVM.General.AST.Constant
+import qualified LLVM.General.AST.Constant as Constant
 import LLVM.General.AST.Global
 import qualified  LLVM.General.AST.Global as AST.Global
 import LLVM.General.AST.Linkage
@@ -30,9 +30,7 @@ import qualified Data.Map as Map
 import Data.Char
 import Data.Maybe
 import qualified Data.Int as HInt
-import Debug.Trace
 import Control.Applicative (Applicative)
-import Data.Functor
 import Control.Monad.State
 import qualified Control.Monad.Except as Except
 
@@ -55,7 +53,7 @@ data CompilerState = CompilerState {
   blocks       :: [AST.Name],
   currentBlock :: AST.Name,
   supplier     :: NumSupplier,
-  glFunTypeEnv :: Map.Map String (AST.Type, [AST.Type]),
+  funEnv       :: FunEnv,
   classEnv     :: ClassEnv,
   stringConsts :: StringConstEnv,
   supplierStr  :: NumSupplier
@@ -67,7 +65,7 @@ defaultCompilerState = CompilerState {
   blocks       = [],
   currentBlock = error "No current block",
   supplier     = newNumSupplier,
-  glFunTypeEnv = emptyEnv,
+  funEnv       = emptyEnv,
   classEnv     = emptyClassEnv,
   stringConsts = emptyEnv,
   supplierStr  = newNumSupplier
@@ -81,7 +79,7 @@ runCompilerType (CompilerType x) = evalStateT x defaultCompilerState
 
 resetCompilerState ::  CompilerType ()
 resetCompilerState = CompilerType $ modify $ (\s -> defaultCompilerState {
-  glFunTypeEnv = glFunTypeEnv s,
+  funEnv       = funEnv s,
   classEnv     = classEnv s,
   stringConsts = stringConsts s,
   supplierStr  = supplierStr s
@@ -104,7 +102,7 @@ removeFromEnv ident = modify $ \s -> s { environment = Map.delete ident (environ
 lookupEnv :: AST.Name -> CompilerType AST.Operand
 lookupEnv ident = do
   env <- getEnv
-  maybe (fail internalErrMsg) (return . id) (Map.lookup ident env)
+  maybe (fail internalErrMsg) return (Map.lookup ident env)
 
 getClassInfo :: String -> CompilerType ClassInfo
 getClassInfo ident = do
@@ -212,16 +210,10 @@ getStrConstDefs = do
 
 getFunRetType :: String -> CompilerType AST.Type
 getFunRetType ident = do
-  tenv <- gets glFunTypeEnv
+  tenv <- gets funEnv
   case (Map.lookup ident tenv) of
-    Just (rType, _)  -> return rType
-    _ -> fail internalErrMsg
-
-typeInfoToFunInfo :: FunInfo -> CompilerType (AST.Type, [AST.Type])
-typeInfoToFunInfo (rType, args, _) = do
-  crType <- compileType rType
-  cargs <- mapM compileType args
-  return (crType, cargs)
+    Just finf -> return $ compileType $ functionReturnType finf
+    _ -> fail $ internalErrMsg
 
 getNewNr' :: CompilerState -> (Int, CompilerState)
 getNewNr' s =
@@ -295,24 +287,13 @@ compileBasicBlockInfo bbi =
 
 funDeclForBuiltIns' :: ABS.Type -> String -> [(ABS.Type, String)] -> CompilerType AST.Definition
 funDeclForBuiltIns' rType name args = do
-  rType' <- compileType rType
-  let name' = Name name
-  params <- mapM (\(at, aname) -> do
-    at' <- compileType at
-    let aname' = Name aname
-    return $ Parameter at' aname' []) args
+  let rType' = compileType rType
+      name' = Name name
+      params = map (\(at, aname) -> Parameter (compileType at) (Name aname) []) args
   return $ newFunDecl rType' name' params
 
 funDeclForBuiltIns :: CompilerType [AST.Definition]
 funDeclForBuiltIns = mapM (\(t, n, a) -> funDeclForBuiltIns' t n a) builtInsDescs
-
-mallocIdent = "malloc"
-mallocDecl = newFunDecl (PointerType i8 defaultAddrSpace) (Name mallocIdent) [Parameter i32 (UnName  0) []]
-
-additionalCDecls = [mallocDecl]
-additionalCDeclsEnv = Map.fromList [(mallocIdent, (PointerType i8 defaultAddrSpace, [i32]))]
-
-defaultAddrSpace = AddrSpace 0
 
 boolBits = 8
 boolType = i8
@@ -321,7 +302,7 @@ charBits = 8
 intType = i32
 intBits = 32
 maxInt = (toInteger (maxBound :: HInt.Int32))
-stringType = PointerType charType defaultAddrSpace
+stringType = ptr charType
 pointerBits = 64
 
 className :: String -> Name
@@ -330,15 +311,15 @@ className id = Name $ "class." ++ id
 constStringType :: Int -> AST.Type
 constStringType size = ArrayType (fromIntegral size) charType
 
-compileType :: ABS.Type -> CompilerType AST.Type
+compileType :: ABS.Type -> AST.Type
 compileType (TType x) = case x of
-  TBuiltIn BIInt -> return $ intType
-  TBuiltIn BIVoid -> return VoidType
-  TBuiltIn BIBool -> return boolType
-  TBuiltIn BIStr -> return stringType
-  TClass (CType (Ident id)) -> return $ PointerType (classTypeRef id) defaultAddrSpace
-  _ -> fail internalErrMsg
-compileType _ = fail internalErrMsg
+  TBuiltIn BIInt -> intType
+  TBuiltIn BIVoid -> VoidType
+  TBuiltIn BIBool -> boolType
+  TBuiltIn BIStr -> stringType
+  TClass (CType (Ident id)) -> ptr $ classTypeRef id
+  TClass (CPType (PIdent(_, id))) -> ptr $ classTypeRef id
+compileType (TFun tret targs) = FunctionType (compileType tret) (map compileType targs) False
 
 classTypeRef :: String -> AST.Type
 classTypeRef classId = NamedTypeReference $ className classId
@@ -386,12 +367,10 @@ defaultValue (TType x) = case x of
   TBuiltIn BIVoid -> fail internalErrMsg
   TBuiltIn BIBool -> return defaultBoolVal
   TBuiltIn BIStr  -> refToStringConst ""
-  TClass _        -> do
-    ct <- compileType (TType x)
-    return $ ConstantOperand $ Null ct
+  TClass _        -> return $ ConstantOperand $ Null $ compileType (TType x)
 defaultValue _ = fail internalErrMsg
 
-globalStringConst :: Name -> String -> Definition
+globalStringConst :: AST.Name -> String -> AST.Definition
 globalStringConst name s =
   GlobalDefinition $ globalVariableDefaults {
     name             = name,
@@ -401,6 +380,48 @@ globalStringConst name s =
     AST.Global.type' = constStringType $ length s,
     initializer      = Just $ Array charType (map getCharConst s)
     }
+
+objectClassDef = TypeDefinition (className objectClassId) (Just $ StructureType False [ptrToVTableType])
+
+compileFunInfoType :: FunctionInfo -> Constant
+compileFunInfoType finf =
+  GlobalReference (compileType $ TFun (functionReturnType finf) (functionArgsTypes finf)) (Name $ functionName finf)
+
+funInfoToVTableRec :: FunctionInfo -> Constant
+funInfoToVTableRec finf = Constant.BitCast (compileFunInfoType finf) (ptr i8)
+
+ptrToVTableType :: AST.Type
+ptrToVTableType = ptr $ ptr $ FunctionType i32 [] True
+
+vtableType :: Int -> AST.Type
+vtableType size = ArrayType (fromIntegral size) (ptr i8)
+
+vtableConst :: AST.Name -> [FunctionInfo] -> AST.Definition
+vtableConst name funInfos =
+  GlobalDefinition $ globalVariableDefaults {
+    name             = name,
+    linkage          = Private,
+    hasUnnamedAddr   = True,
+    isConstant       = True,
+    AST.Global.type' = vtableType $ length funInfos,
+    initializer      = Just $ Array (ptr i8) (map funInfoToVTableRec funInfos)
+    }
+
+classIdToVTableName :: String -> AST.Name
+classIdToVTableName classId = Name $ "_VT_" ++ classId
+
+classVTable :: String -> CompilerType AST.Operand
+classVTable classId = do
+  cinfo <- getClassInfo classId
+  let vttype = vtableType $ Map.size $ classMethods cinfo
+      oper = constGlobalReference vttype (classIdToVTableName classId)
+  bitcast oper ptrToVTableType
+
+virtualTables :: CompilerType [AST.Definition]
+virtualTables = do
+  cenv <- gets classEnv
+  return $ map (\(classId, cinf) ->
+    vtableConst (classIdToVTableName classId) (Map.elems $ classMethods cinf)) $ Map.toList cenv
 
 nameInstruction :: AST.Type -> AST.Instruction -> CompilerType AST.Operand
 nameInstruction t inst = do
@@ -417,7 +438,7 @@ storeVar ident value = do
   store oper value-}
 
 alloc :: AST.Type -> CompilerType AST.Operand
-alloc t = nameInstruction (PointerType t defaultAddrSpace) $ Alloca t Nothing 0 []
+alloc t = nameInstruction (ptr t) $ Alloca t Nothing 0 []
 
 load :: AST.Operand -> CompilerType AST.Operand
 load op = case op of
@@ -435,11 +456,14 @@ allocAndStore t name oper = do
   store op oper
   addToEnv name op
 
+callOperand :: AST.Type -> AST.Operand -> [AST.Operand] ->  CompilerType AST.Operand
+callOperand tret fun args =
+ nameInstruction (pointerReferent tret) $ Call Nothing CallConv.C [] (Right $ fun) (map (\arg -> (arg, [])) args) [] []
+
 call :: String -> [AST.Operand] -> CompilerType AST.Operand
 call name args = do
   retType <- getFunRetType name
-  nameInstruction (pointerReferent intType) $ Call Nothing CallConv.C [] (Right $
-    constGlobalReference retType (Name name)) (map (\arg -> (arg, [])) args) [] []
+  callOperand retType (constGlobalReference retType (Name name)) args
 
 ret :: Maybe AST.Operand -> AST.Named AST.Terminator
 ret mval = Do $ Ret { returnOperand = mval, metadata' = [] }
@@ -460,9 +484,7 @@ bitcast :: AST.Operand -> AST.Type -> CompilerType AST.Operand
 bitcast oper t = nameInstruction t $ AST.BitCast oper t []
 
 bitcastClass :: AST.Operand -> String -> CompilerType AST.Operand
-bitcastClass address tclassId = do
-  t <- compileType $ classType tclassId
-  bitcast address t
+bitcastClass address tclassId = bitcast address $ compileType $ classType tclassId
 
 compileModuleToLLVM :: AST.Module -> IO (Err String)
 compileModuleToLLVM mod = withContext $ \context ->
@@ -476,25 +498,20 @@ compileCProgram pname prog = runCompilerType $ compileCProgram' pname prog
 
 compileCProgram' :: String -> CProgramInfo -> CompilerType AST.Module
 compileCProgram' pname (CProgram topdefs, cenv, fenv) = do
-  funenv <- fmap Map.fromList $ mapM (\(ident, tinfo) -> do
-    funinfo <- typeInfoToFunInfo tinfo
-    return (ident, funinfo)) $ Map.toList fenv
-  modify $ \s -> s { glFunTypeEnv = Map.union funenv additionalCDeclsEnv, classEnv = cenv }
+  modify $ \s -> s { funEnv = fenv, classEnv = cenv }
+  vtables <- virtualTables
   decls <- funDeclForBuiltIns
   defs <- mapM compileCTopDef topdefs
   strConstDefs <- getStrConstDefs
-  return $ newModule pname (strConstDefs ++ decls ++ additionalCDecls ++ defs)
+  return $ newModule pname (strConstDefs ++ vtables ++ decls ++ [objectClassDef] ++ defs)
 
 compileCFunDef :: CFunDef -> CompilerType AST.Definition
 compileCFunDef (CFunDef tret ident args block) = do
   resetCompilerState
   newCurrentBlock
-  tret' <- compileType tret
-  let fname = Name ident
-  params <- mapM (\(CArg atype aid) -> do
-    atype' <- compileType atype
-    let aname = Name aid
-    return $ Parameter atype' aname []) args
+  let tret' = compileType tret
+      fname = Name ident
+      params    = map (\(CArg atype aid) -> Parameter (compileType atype) (Name aid) []) args
   mapM_ (\(Parameter atype aname _) -> allocAndStore atype aname (LocalReference atype aname)) params
   compileCBlock block
   bblocks <- getBasicBlocks
@@ -504,11 +521,8 @@ compileCTopDef :: CTopDef -> CompilerType AST.Definition
 compileCTopDef x = case x of
   CTDFnDef fdef -> compileCFunDef fdef
   CTDCDef (CCDef classId superClass (CCBody decls)) -> do
-    elemTypes <- concat <$> mapM (\decl -> case decl of
-                                    CCVar t pidents -> do
-                                      t' <- compileType t
-                                      return $ replicate (length pidents) t') decls
-    let scref = maybe [] (\x -> [classTypeRef x]) superClass
+    let elemTypes = concatMap (\(CCVar t pidents) -> replicate (length pidents) (compileType t)) decls
+        scref = maybe [] (\x -> [classTypeRef x]) superClass
         elemTypes' = scref ++ elemTypes
     return $ TypeDefinition (className classId) (Just $ StructureType False elemTypes')
 
@@ -523,14 +537,12 @@ compileCStmt x = case x of
   CSEmpty -> return ()
   CSBlock block -> compileCBlock block
   CSExp expr -> compileCExpr expr >> return ()
-  CSRet expr -> do
-    val <- compileCExpr expr
-    setCurrentBlockTerminator $ ret $ Just val
+  CSRet rtype expr -> setCurrentBlockTerminator . ret . Just =<< compileAndCastCExpr rtype expr
   CSVRet -> setCurrentBlockTerminator $ ret Nothing
   CSDecl decl -> compileCDecl decl
   CSAss (ref, tref) expr -> do
     oper <- compileCRef ref tref
-    val <- compileCExpr expr
+    val <- compileAndCastCExpr tref expr
     store oper val
   CSCondElse expr stmt1 stmt2 -> do
     val <- compileCExpr expr
@@ -573,24 +585,23 @@ compileCStmt x = case x of
 
 compileCDecl :: CDecl -> CompilerType ()
 compileCDecl (CDecl t items) = do
-  t' <- compileType t
+  let t' = compileType t
   mapM_ (\item -> case item of
     CINoInit ident   -> do
       val <- defaultValue t
       allocAndStore t' (Name ident) val
     CIInit ident exp -> do
-      val <- compileCExpr exp
+      val <- compileAndCastCExpr t exp
       allocAndStore t' (Name ident) val
         ) items
 
-compileCExpr :: CTExpr -> CompilerType AST.Operand
-compileCExpr expr@(_, texpr) = do
-  ctexpr <- compileType texpr
-  oper <- compileCExpr' expr
-  bitcast oper ctexpr
+compileAndCastCExpr :: ABS.Type -> CTExpr -> CompilerType AST.Operand
+compileAndCastCExpr t expr = do
+  oper <- compileCExpr expr
+  bitcast oper $ compileType t
 
-compileCExpr' :: CTExpr -> CompilerType AST.Operand
-compileCExpr' (x, tx) = case x of
+compileCExpr :: CTExpr -> CompilerType AST.Operand
+compileCExpr (x, tx) = case x of
   CERef ref -> do
     oper <- compileCRef ref tx
     load oper
@@ -604,19 +615,31 @@ compileCExpr' (x, tx) = case x of
   CBinOp expr1 opr expr2 -> compileCBinOpr expr1 expr2 opr tx
   CENew (CNClass ident) -> do
     cbytes <- classBytes ident
-    oper <- call mallocIdent ([intConstOper cbytes])
-    let ctype = classType ident
-    ctype' <- compileType ctype
-    caddr <- bitcast oper ctype'
+    oper <- call (functionName mallocFI) ([intConstOper cbytes])
+    let ctype = compileType $ classType ident
+    caddr <- bitcast oper ctype
     initClass ident caddr
     return caddr
-  CENull t -> do
-    ct <- compileType t
-    return $ ConstantOperand $ Null ct
+  CENull t -> return $ ConstantOperand $ Null $ compileType t
+  CEMet varId metId args -> do
+    compiledArgs <- mapM compileCExpr args
+    varAddress <- loadVar varId
+    let targs = map compileType $ map snd args
+        tret = compileType tx
+        ftype = FunctionType tret targs False
+        ftypeptr = ptr $ ptr $ ftype
+    vtableAddr <- bitcast varAddress $ ptr ftypeptr
+    vtable <- load vtableAddr
+    metAddr <- getElementPtr ftypeptr vtable [(fromIntegral metId)]
+    met <- load metAddr
+    callOperand tret met compiledArgs
 
 initClass :: String -> AST.Operand -> CompilerType ()
 initClass classId address = do
   cinfo <- getClassInfo classId
+  vtptr <- bitcast address $ ptr ptrToVTableType
+  cvt <- classVTable classId
+  store vtptr cvt
   mapM_ (\(t, i, sc) -> do
     oper <- bitcastClass address sc
     field <- getField oper t i
@@ -624,15 +647,13 @@ initClass classId address = do
     store field val) $ Map.elems $ classFields cinfo
 
 getField :: AST.Operand -> ABS.Type -> Integer -> CompilerType AST.Operand
-getField address t fieldIndex = do
-  ct <- compileType t
-  getElementPtr (PointerType ct defaultAddrSpace) address [0, fieldIndex]
+getField address t fieldIndex = getElementPtr (ptr $ compileType t) address [0, fieldIndex]
 
 compileCRef :: CRef -> ABS.Type -> CompilerType AST.Operand
 compileCRef x tx = case x of
-  CRVar ident -> lookupEnv (Name ident)
-  CRDot varid fieldIndex fieldClass -> do
-    oper <- loadVar varid
+  CRVar varId -> lookupEnv (Name varId)
+  CRDot varId fieldIndex fieldClass -> do
+    oper <- loadVar varId
     oper' <- bitcastClass oper fieldClass
     getField oper' tx fieldIndex
 
@@ -665,8 +686,8 @@ compileCBinOpr expr1 expr2 binOp retT = do
 
 compileCBinOpr' :: CTExpr -> CTExpr -> String -> ABS.Type -> CompilerType AST.Operand
 compileCBinOpr' expr1 expr2 binOp retT = do
-  cretT <- compileType retT
-  let binOpF = (binOprs Map.! binOp)
+  let cretT = compileType retT
+      binOpF = (binOprs Map.! binOp)
   oper1 <- compileCExpr expr1
   case () of
     _ | elem binOp logOps -> do
