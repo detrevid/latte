@@ -26,15 +26,15 @@ type TypeEnv = Map.Map String TypeInfo
 emptyTypeEnv :: TypeEnv
 emptyTypeEnv = Map.empty
 
-
 data FunctionInfo = FunctionInfo {
   functionName       :: String,
   functionReturnType :: Type,
   functionArgs       :: [(Type, String)],
   functionArgsTypes  :: [Type],
-  functionDeclPos    :: Position
+  functionDeclPos    :: Position,
+  functionIndex      :: Int
   } deriving (Eq, Ord, Show, Read)
-defaultFunctionInfo = FunctionInfo "" typeVoid [] []
+defaultFunctionInfo = FunctionInfo "" typeVoid [] [] (-1, -1) 0
 
 type FunEnv = Map.Map String FunctionInfo
 emptyFunEnv :: FunEnv

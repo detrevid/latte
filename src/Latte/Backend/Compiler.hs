@@ -29,6 +29,7 @@ import Control.Lens ((^.))
 import qualified Data.Map as Map
 import Data.Char
 import Data.Maybe
+import Data.List (sortBy)
 import qualified Data.Int as HInt
 import Control.Applicative (Applicative)
 import Control.Monad.State
@@ -93,11 +94,6 @@ getEnv = gets environment
 
 addToEnv :: AST.Name -> AST.Operand -> CompilerType ()
 addToEnv ident t = modify $ \s -> s { environment = Map.insert ident t (environment s) }
-
-{-
-removeFromEnv :: AST.Name -> CompilerType ()
-removeFromEnv ident = modify $ \s -> s { environment = Map.delete ident (environment s) }
--}
 
 lookupEnv :: AST.Name -> CompilerType AST.Operand
 lookupEnv ident = do
@@ -191,8 +187,9 @@ addStringConst str = do
   modify $ (\s -> s { stringConsts = Map.insert str' name (stringConsts s) })
   return name
 
-getElementPtr :: AST.Type -> Operand -> [Integer] -> CompilerType AST.Operand
-getElementPtr t address indices = nameInstruction t $ Instruction.GetElementPtr True address (map intConstOper indices) []
+getElementPtr :: AST.Type -> AST.Operand -> [Integer] -> CompilerType AST.Operand
+getElementPtr t address indices =
+  nameInstruction t $ Instruction.GetElementPtr True address (map intConstOper indices) []
 
 constGlobalReference :: AST.Type -> AST.Name -> AST.Operand
 constGlobalReference t n = ConstantOperand $ GlobalReference t n
@@ -355,9 +352,6 @@ getBoolConstOper b = case b of
 getCharConst :: Char -> Constant
 getCharConst c = Int charBits $ fromIntegral $ ord c
 
-{-getCharConstOper :: Char -> Operand
-getCharConstOper c = ConstantOperand $ getCharConst c-}
-
 defaultIntVal = intConstOper 0
 defaultBoolVal = getBoolConstOper False
 
@@ -421,7 +415,8 @@ virtualTables :: CompilerType [AST.Definition]
 virtualTables = do
   cenv <- gets classEnv
   return $ map (\(classId, cinf) ->
-    vtableConst (classIdToVTableName classId) (Map.elems $ classMethods cinf)) $ Map.toList cenv
+    vtableConst (classIdToVTableName classId) (sortBy (\x y ->
+       compare (functionIndex x) (functionIndex y)) $ Map.elems $ classMethods cinf)) $ Map.toList cenv
 
 nameInstruction :: AST.Type -> AST.Instruction -> CompilerType AST.Operand
 nameInstruction t inst = do
@@ -432,11 +427,6 @@ nameInstruction t inst = do
 store :: AST.Operand -> AST.Operand -> CompilerType ()
 store address value = addInstrsToCurrentBlock [Do $ Store False address value Nothing 0 []]
 
-{-storeVar :: String -> AST.Operand -> CompilerType ()
-storeVar ident value = do
-  oper <- lookupEnv (Name ident)
-  store oper value-}
-
 alloc :: AST.Type -> CompilerType AST.Operand
 alloc t = nameInstruction (ptr t) $ Alloca t Nothing 0 []
 
@@ -444,11 +434,6 @@ load :: AST.Operand -> CompilerType AST.Operand
 load op = case op of
   LocalReference (PointerType pref _) _ -> nameInstruction pref $ Load False op Nothing 0 []
   _ -> fail internalErrMsg
-
-loadVar :: String -> CompilerType AST.Operand
-loadVar ident = do
-  oper <- lookupEnv (Name ident)
-  load oper
 
 allocAndStore :: AST.Type -> AST.Name -> Operand -> CompilerType ()
 allocAndStore t name oper = do
@@ -536,16 +521,16 @@ compileCStmt :: CStmt -> CompilerType ()
 compileCStmt x = case x of
   CSEmpty -> return ()
   CSBlock block -> compileCBlock block
-  CSExp expr -> compileCExpr expr >> return ()
+  CSExp expr -> compileRCExpr expr >> return ()
   CSRet rtype expr -> setCurrentBlockTerminator . ret . Just =<< compileAndCastCExpr rtype expr
   CSVRet -> setCurrentBlockTerminator $ ret Nothing
   CSDecl decl -> compileCDecl decl
-  CSAss (ref, tref) expr -> do
-    oper <- compileCRef ref tref
-    val <- compileAndCastCExpr tref expr
-    store oper val
+  CSAss lexpr@(_, ltype) rexpr -> do
+    lval <- compileLCExpr lexpr
+    rval <- compileAndCastCExpr ltype rexpr
+    store lval rval
   CSCondElse expr stmt1 stmt2 -> do
-    val <- compileCExpr expr
+    val <- compileRCExpr expr
     val' <- trunc val i1
     afterCondLabel <- getCurrentBlock
     trueLabel <- newCurrentBlock
@@ -567,7 +552,7 @@ compileCStmt x = case x of
     condLabel <- newBlock
     setCurrentBlockTerminator $ br condLabel
     setCurrentBlock condLabel
-    val <- compileCExpr expr
+    val <- compileRCExpr expr
     val' <- trunc val i1
     whileBodyLabel <- newCurrentBlock
     compileCStmt stmt
@@ -583,6 +568,38 @@ compileCStmt x = case x of
     afterRepeatBodyLabel <- getCurrentBlock
     setUnBlockTerminator afterRepeatBodyLabel $ br repeatBodyLabel
 
+compileLCExpr :: CTExpr -> CompilerType AST.Operand
+compileLCExpr (x, tx) = case x of
+  CEApp ident args -> do
+    compiledArgs <- mapM compileRCExpr args
+    call ident compiledArgs
+  CENew (CNClass ident) -> do
+    cbytes <- classBytes ident
+    oper <- call (functionName mallocFI) ([intConstOper cbytes])
+    let ctype = compileType $ classType ident
+    caddr <- bitcast oper ctype
+    initClass ident caddr
+    return caddr
+  CEMet callerExp@(_, tcaller) metId args -> do
+    compiledArgs <- mapM compileRCExpr args
+    caller <- compileRCExpr callerExp
+    let compiledArgs' = caller : compiledArgs
+        targs = map compileType $ tcaller : (map snd args)
+        tret = compileType tx
+        ftype = FunctionType tret targs False
+        ftypeptr = ptr $ ptr $ ftype
+    vtableAddr <- bitcast caller $ ptr ftypeptr
+    vtable <- load vtableAddr
+    metAddr <- getElementPtr ftypeptr vtable [(fromIntegral metId)]
+    met <- load metAddr
+    callOperand tret met compiledArgs'
+  CEDot varExp fieldIndex fieldClass -> do
+    var <- compileRCExpr varExp
+    oper' <- bitcastClass var fieldClass
+    getField oper' tx fieldIndex
+  CEVar varId -> lookupEnv (Name varId)
+  _ -> fail internalErrMsg
+
 compileCDecl :: CDecl -> CompilerType ()
 compileCDecl (CDecl t items) = do
   let t' = compileType t
@@ -597,42 +614,22 @@ compileCDecl (CDecl t items) = do
 
 compileAndCastCExpr :: ABS.Type -> CTExpr -> CompilerType AST.Operand
 compileAndCastCExpr t expr = do
-  oper <- compileCExpr expr
+  oper <- compileRCExpr expr
   bitcast oper $ compileType t
 
-compileCExpr :: CTExpr -> CompilerType AST.Operand
-compileCExpr (x, tx) = case x of
-  CERef ref -> do
-    oper <- compileCRef ref tx
-    load oper
+compileRCExpr :: CTExpr -> CompilerType AST.Operand
+compileRCExpr xt@(x, tx) = case x of
   CELit lit -> case lit of
     CLInt val -> return $ intConstOper val
     CLBool val -> return $ getBoolConstOper val
     CLString str -> refToStringConst str
-  CEApp ident args -> do
-    compiledArgs <- mapM compileCExpr args
-    call ident compiledArgs
+  CEApp _ _ -> compileLCExpr xt
   CBinOp expr1 opr expr2 -> compileCBinOpr expr1 expr2 opr tx
-  CENew (CNClass ident) -> do
-    cbytes <- classBytes ident
-    oper <- call (functionName mallocFI) ([intConstOper cbytes])
-    let ctype = compileType $ classType ident
-    caddr <- bitcast oper ctype
-    initClass ident caddr
-    return caddr
+  CENew _ -> compileLCExpr xt
   CENull t -> return $ ConstantOperand $ Null $ compileType t
-  CEMet varId metId args -> do
-    compiledArgs <- mapM compileCExpr args
-    varAddress <- loadVar varId
-    let targs = map compileType $ map snd args
-        tret = compileType tx
-        ftype = FunctionType tret targs False
-        ftypeptr = ptr $ ptr $ ftype
-    vtableAddr <- bitcast varAddress $ ptr ftypeptr
-    vtable <- load vtableAddr
-    metAddr <- getElementPtr ftypeptr vtable [(fromIntegral metId)]
-    met <- load metAddr
-    callOperand tret met compiledArgs
+  CEMet _ _ _ -> compileLCExpr xt
+  CEDot _ _ _ -> load =<< compileLCExpr xt
+  CEVar _ -> load =<< compileLCExpr xt
 
 initClass :: String -> AST.Operand -> CompilerType ()
 initClass classId address = do
@@ -648,14 +645,6 @@ initClass classId address = do
 
 getField :: AST.Operand -> ABS.Type -> Integer -> CompilerType AST.Operand
 getField address t fieldIndex = getElementPtr (ptr $ compileType t) address [0, fieldIndex]
-
-compileCRef :: CRef -> ABS.Type -> CompilerType AST.Operand
-compileCRef x tx = case x of
-  CRVar varId -> lookupEnv (Name varId)
-  CRDot varId fieldIndex fieldClass -> do
-    oper <- loadVar varId
-    oper' <- bitcastClass oper fieldClass
-    getField oper' tx fieldIndex
 
 binOprs :: Map.Map String (Operand -> Operand -> InstructionMetadata -> Instruction)
 binOprs = Map.fromList [
@@ -688,7 +677,7 @@ compileCBinOpr' :: CTExpr -> CTExpr -> String -> ABS.Type -> CompilerType AST.Op
 compileCBinOpr' expr1 expr2 binOp retT = do
   let cretT = compileType retT
       binOpF = (binOprs Map.! binOp)
-  oper1 <- compileCExpr expr1
+  oper1 <- compileRCExpr expr1
   case () of
     _ | elem binOp logOps -> do
         oper1' <- trunc oper1 i1
@@ -696,7 +685,7 @@ compileCBinOpr' expr1 expr2 binOp retT = do
         store sol oper1
         afterFirstExp <- getCurrentBlock
         continueCompLabel <- newCurrentBlock
-        oper2 <- compileCExpr expr2
+        oper2 <- compileRCExpr expr2
         store sol oper2
         afterContinueCompLabel <- getCurrentBlock
         afterBinOpLabel <- newCurrentBlock
@@ -706,5 +695,5 @@ compileCBinOpr' expr1 expr2 binOp retT = do
         setUnBlockTerminator afterContinueCompLabel (br afterBinOpLabel)
         load sol
       | True -> do
-        oper2 <- compileCExpr expr2
+        oper2 <- compileRCExpr expr2
         nameInstruction cretT $ binOpF oper1 oper2 []

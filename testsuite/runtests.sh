@@ -2,10 +2,18 @@
 
 make
 
-testsDirs=(./testsuite/tests/lattests/good/  ./testsuite/tests/mrjp-tests/good/basic/
-  ./testsuite/tests/testy-latte/basic/msz/good/ ./testsuite/tests/testy-latte/basic/sygi/good/
+testsDirs=(
+  ./testsuite/tests/lattests/good/
+  ./testsuite/tests/mrjp-tests/good/basic/
+  ./testsuite/tests/testy-latte/basic/msz/good/
+  ./testsuite/tests/testy-latte/basic/sygi/good/
   ./testsuite/tests/mytests/good/
-  ./testsuite/tests/lattests/extensions/struct/)
+  ./testsuite/tests/lattests/extensions/struct/
+  ./testsuite/tests/lattests/extensions/objects1/
+  ./testsuite/tests/lattests/extensions/objects2/
+  ./testsuite/tests/testy-latte/objects1/sygi/good/
+  ./testsuite/tests/testy-latte/objects2/sygi/good/
+  )
 
 for testsDir in "${testsDirs[@]}"; do
     for test in ${testsDir}*.lat; do

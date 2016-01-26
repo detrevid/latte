@@ -62,9 +62,9 @@ IInit.      Item ::= PIdent "=" Expr ;
 
 separator nonempty Item "," ;
 
-SAss.       Stmt ::= Ref "=" Expr  ";" ;
+SAss.       Stmt ::= Expr7 "=" Expr  ";" ;
 
-SDIncr.      Stmt ::= Ref TDIOp  ";" ;
+SDIncr.      Stmt ::= Expr7 TDIOp ";" ;
 
 SRet.       Stmt ::= TRet Expr ";" ;
 
@@ -147,21 +147,19 @@ LString.   Literal ::= String ;
 
 NClass.    New ::= "new" PIdent ;
 
-RDot.      Ref  ::= PIdent "." PIdent ;
+ENull.     Expr8 ::= Expr9 "null" ;
 
-RVar.      Ref ::= PIdent ;
+EVar.      Expr8 ::= PIdent ;
 
-ENull.     Expr6  ::= Expr7 "null" ;
+EDot.      Expr7 ::= Expr7 "." PIdent ;
 
-ERef.      Expr6 ::= Ref ;
+EMet.      Expr7 ::= Expr7 "." FApp ;
+
+EApp.      Expr7 ::= FApp ;
+
+ENew.      Expr7 ::= New ;
 
 ELit.      Expr6 ::= Literal ;
-
-EMet.      Expr6 ::= PIdent "." FApp ;
-
-EApp.      Expr6 ::= FApp ;
-
-ENew.      Expr6 ::= New ;
 
 EUnOp.     Expr5 ::= UnOp Expr6 ;
 
@@ -175,7 +173,7 @@ EAnd.      Expr1 ::= Expr2 TLogAndOp Expr1 ;
 
 EOr.       Expr ::= Expr1 TLogOrOp Expr ;
 
-coercions  Expr 7 ;
+coercions  Expr 9 ;
 
 separator  Expr "," ;
 
@@ -196,4 +194,3 @@ comment    "#" ;
 comment    "//" ;
 
 comment    "/*" "*/" ;
-

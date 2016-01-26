@@ -21,7 +21,7 @@ getBinFunTypeInfo fi = (functionName fi, (getFunTypeFI fi, binpos, bidepth))
 getBinFunInfo :: FunctionInfo -> (String, FunctionInfo)
 getBinFunInfo fi = (functionName fi, fi)
 
-printIntFI = FunctionInfo {
+printIntFI = defaultFunctionInfo {
   functionName       = "printInt",
   functionReturnType = typeVoid,
   functionArgs  = [(typeInt, "x")],
@@ -29,7 +29,7 @@ printIntFI = FunctionInfo {
   functionDeclPos = binpos
 }
 
-printStringFI = FunctionInfo {
+printStringFI = defaultFunctionInfo {
   functionName       = "printString",
   functionReturnType = typeVoid,
   functionArgs  = [(typeString, "s")],
@@ -37,7 +37,7 @@ printStringFI = FunctionInfo {
   functionDeclPos = binpos
 }
 
-errorFI = FunctionInfo {
+errorFI = defaultFunctionInfo {
   functionName       = "error",
   functionReturnType = typeVoid,
   functionArgs  = [],
@@ -45,7 +45,7 @@ errorFI = FunctionInfo {
   functionDeclPos = binpos
 }
 
-readIntFI = FunctionInfo {
+readIntFI = defaultFunctionInfo {
   functionName       = "readInt",
   functionReturnType = typeInt,
   functionArgs  = [],
@@ -53,7 +53,7 @@ readIntFI = FunctionInfo {
   functionDeclPos = binpos
 }
 
-readStringFI = FunctionInfo {
+readStringFI = defaultFunctionInfo {
   functionName       = "readString",
   functionReturnType = typeString,
   functionArgs  = [],
@@ -61,7 +61,7 @@ readStringFI = FunctionInfo {
   functionDeclPos = binpos
 }
 
-concatStringFI = FunctionInfo {
+concatStringFI = defaultFunctionInfo {
   functionName       = "concatString",
   functionReturnType = typeString,
   functionArgs  = [(typeString, "str1"), (typeString, "str2")],
@@ -69,7 +69,7 @@ concatStringFI = FunctionInfo {
   functionDeclPos = binpos
 }
 
-equalsStringFI = FunctionInfo {
+equalsStringFI = defaultFunctionInfo {
   functionName       = "equalsString",
   functionReturnType = typeBool,
   functionArgs  = [(typeString, "str1"), (typeString, "str2")],
@@ -77,8 +77,7 @@ equalsStringFI = FunctionInfo {
   functionDeclPos = binpos
 }
 
---TODO think about it  - should malloc return type be a string?
-mallocFI = FunctionInfo {
+mallocFI = defaultFunctionInfo {
   functionName       = "malloc",
   functionReturnType = typeString,
   functionArgs  = [(typeInt, "x")],
@@ -97,7 +96,7 @@ bultInsFunInfos = map getBinFunInfo builtIns
 addBuiltInsToFunEnv :: FunEnv -> FunEnv
 addBuiltInsToFunEnv = flip Map.union $ Map.fromList bultInsFunInfos
 
-objectClassId = "NothingObject"
+objectClassId = "Object"
 objectClassPId = PIdent(binpos, objectClassId)
 objectClass = CTDCDef $ CCDef objectClassId objectSuperClass emptyBody
 objectSuperClass = Nothing
@@ -111,4 +110,4 @@ builtInsClassEnv = [(objectClassId, objectClassInfo)]
 addBuiltInsToClassEnv :: ClassEnv -> ClassEnv
 addBuiltInsToClassEnv = flip Map.union $ Map.fromList builtInsClassEnv
 
-thisId = "this"
+thisId = "self"

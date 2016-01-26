@@ -41,7 +41,7 @@ data CStmt
     = CSEmpty
     | CSBlock CBlock
     | CSDecl CDecl
-    | CSAss CTRef CTExpr
+    | CSAss CTExpr CTExpr
     | CSRet Type CTExpr
     | CSVRet
     | CSCondElse CTExpr CStmt CStmt
@@ -59,18 +59,14 @@ data CLiteral = CLInt Integer | CLBool Bool | CLString String
 data CNew = CNClass CIdent
   deriving (Eq, Ord, Show, Read)
 
-type CTRef = (CRef, Type)
-
-data CRef = CRDot CIdent Integer CIdent | CRVar CIdent
-  deriving (Eq, Ord, Show, Read)
-
 type CTExpr = (CExpr, Type)
 
 data CExpr
-    = CERef CRef
-    | CELit CLiteral
+    = CELit CLiteral
     | CEApp CIdent [CTExpr]
-    | CEMet CIdent Int [CTExpr]
+    | CEMet CTExpr Int [CTExpr]
+    | CEDot CTExpr Integer CIdent
+    | CEVar CIdent
     | CBinOp CTExpr COperator CTExpr
     | CENew CNew
     | CENull Type

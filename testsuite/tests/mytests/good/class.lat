@@ -5,7 +5,7 @@ class List {
   string s;
   int zero;
 
- int getX() { return this.x; }
+ int getX() { return self.x; }
 }
 
 int getX(List a) { return a.x; }

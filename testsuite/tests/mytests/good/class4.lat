@@ -1,0 +1,21 @@
+class A {
+  int x;
+
+  void setX(int new_x) { x = x + new_x; }
+
+  int getX() { return getXHelper(); }
+  int getXHelper() { return x; }
+}
+
+class B extends A {
+  void nic() {}
+}
+
+int main() {
+  A a = new B;
+  B b = new B;
+  a = b;
+  a.setX(300);
+  printInt(a.getX());
+  return 0;
+}
