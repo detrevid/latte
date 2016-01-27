@@ -475,9 +475,7 @@ phi t vals = nameInstruction t $ Phi t vals []
 compileModuleToLLVM :: AST.Module -> IO (Err String)
 compileModuleToLLVM mod = withContext $ \context ->
   Except.runExceptT >=> either (return . Bad) (return . Ok) $
-    withModuleFromAST context mod $ \m -> do
-      compiled <- moduleLLVMAssembly m
-      return compiled
+    withModuleFromAST context mod $ \m -> moduleLLVMAssembly m
 
 compileCProgram :: String -> CProgramInfo -> Err AST.Module
 compileCProgram pname prog = runCompilerType $ compileCProgram' pname prog
@@ -497,7 +495,7 @@ compileCFunDef (CFunDef tret ident args block) = do
   newCurrentBlock
   let tret' = compileType tret
       fname = Name ident
-      params    = map (\(CArg atype aid) -> Parameter (compileType atype) (Name aid) []) args
+      params = map (\(CArg atype aid) -> Parameter (compileType atype) (Name aid) []) args
   mapM_ (\(Parameter atype aname _) -> allocAndStore atype aname (LocalReference atype aname)) params
   compileCBlock block
   bblocks <- getBasicBlocks

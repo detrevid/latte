@@ -20,7 +20,6 @@ classType x = TType $ TClass $ CType $ Ident x
 
 type Position = (Int, Int)
 
-{-data TypeInfo = TypeInfo { tiType :: Type, tiDecPosition :: Position, tiDecDepth :: Int }-}
 type TypeInfo = (Type, Position, Int)
 type TypeEnv = Map.Map String TypeInfo
 emptyTypeEnv :: TypeEnv
