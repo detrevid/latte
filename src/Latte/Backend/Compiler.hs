@@ -24,8 +24,6 @@ import LLVM.General.Context
 import LLVM.General.Module
 
 import Control.Conditional (unlessM)
-import Control.Lens.Tuple
-import Control.Lens ((^.))
 import qualified Data.Map as Map
 import Data.Char
 import Data.Maybe
@@ -335,7 +333,7 @@ typeBytes _ = 0
 classBytes :: String -> CompilerType Integer
 classBytes ident = do
   cinfo <- getClassInfo ident
-  let fieldsTypes = map (^._1) $ Map.elems $ classFields cinfo
+  let fieldsTypes = map (\(x, _, _) -> x) $ Map.elems $ classFields cinfo
       fieldsBytes = map typeBytes fieldsTypes
   return $ sum fieldsBytes
 
