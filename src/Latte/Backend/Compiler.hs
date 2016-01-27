@@ -471,6 +471,9 @@ bitcast oper t = nameInstruction t $ AST.BitCast oper t []
 bitcastClass :: AST.Operand -> String -> CompilerType AST.Operand
 bitcastClass address tclassId = bitcast address $ compileType $ classType tclassId
 
+phi :: AST.Type -> [(Operand, Name)] -> CompilerType AST.Operand
+phi t vals = nameInstruction t $ Phi t vals []
+
 compileModuleToLLVM :: AST.Module -> IO (Err String)
 compileModuleToLLVM mod = withContext $ \context ->
   Except.runExceptT >=> either (return . Bad) (return . Ok) $
@@ -681,19 +684,16 @@ compileCBinOpr' expr1 expr2 binOp retT = do
   case () of
     _ | elem binOp logOps -> do
         oper1' <- trunc oper1 i1
-        sol <- alloc cretT
-        store sol oper1
         afterFirstExp <- getCurrentBlock
         continueCompLabel <- newCurrentBlock
         oper2 <- compileRCExpr expr2
-        store sol oper2
         afterContinueCompLabel <- getCurrentBlock
         afterBinOpLabel <- newCurrentBlock
         if binOp == logAndOp
           then setUnBlockTerminator afterFirstExp $ condbr oper1' continueCompLabel afterBinOpLabel
           else setUnBlockTerminator afterFirstExp $ condbr oper1' afterBinOpLabel continueCompLabel
-        setUnBlockTerminator afterContinueCompLabel (br afterBinOpLabel)
-        load sol
+        setUnBlockTerminator afterContinueCompLabel $ br afterBinOpLabel
+        phi cretT [(oper1, afterFirstExp), (oper2, afterContinueCompLabel)]
       | True -> do
         oper2 <- compileRCExpr expr2
         nameInstruction cretT $ binOpF oper1 oper2 []
