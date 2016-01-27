@@ -4,11 +4,11 @@ dist/
 .cabal-sandbox/
 cabal.sandbox.config
 
-### JetBrains  IDE
+### JetBrains IDE
 *.iml
 .idea/
 
-### Executables created by Makfile
+### Executables created by Makefile
 latc_llvm
 
 ### Files that are made by ./remake_grammar script
