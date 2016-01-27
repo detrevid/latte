@@ -13,7 +13,6 @@ import Latte.Internal.ASTInternal
 import Control.Applicative (Applicative)
 import Control.Conditional (ifM, unlessM)
 import Control.Monad
-import Control.Monad.Trans.Class
 import Control.Monad.State
 import Data.Functor
 import qualified Data.Map as Map
