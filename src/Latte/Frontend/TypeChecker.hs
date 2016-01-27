@@ -422,26 +422,16 @@ checkTypesExpr' x = case x of
     LTrue       -> return (typeBool, (CELit (CLBool True), typeBool))
     LFalse      -> return (typeBool, (CELit (CLBool False), typeBool))
     LString str -> return (typeString, (CELit (CLString str), typeString))
-  EApp fapp@(FApp pid@(PIdent (fpos, fid)) exps) -> do
-    mfi <- lookupFunEnv pid
-    case mfi of
-      Just (FunctionInfo _ treturn _ targs decPos _) -> do
-        (texps, cexs) <- unzip <$> mapM (checkTypesExpr) exps
-        when (length targs /= length texps) (fail $ "Type Error\n" ++ show fpos ++ "\nFunction " ++ fid ++
-          " declared at " ++ show decPos ++ " used with bad number of arguments." ++ "\nNumber expected: " ++
-          show (length targs) ++ "\nNumber found: " ++ show (length texps) ++ "\n")
-        mapM_ (\(ta, te, exp, i) -> do
-          unlessM (compareTypes ta te) $ fail $ typeError fpos ("Function " ++ fid ++ " declared at " ++ show decPos ++
-            " argument no. " ++ show i ++ ".") (Just exp) (Just ta) te
-          return ()) (zip4 targs texps exps [1..])
-        return (treturn, (CEApp fid cexs, treturn))
-      Nothing -> do
-        env <- getEnv
-        let mthis = Map.lookup thisId env
-        case mthis of
-          Just (_, _, _) -> checkTypesExpr $ EMet (EVar (PIdent (fpos, thisId))) fapp
-             --TODO that is not a good position
-          _ -> fail $ undecError fpos fid
+  EApp fapp@(FApp (PIdent (fpos, fid)) _) -> do
+    env <- getEnv
+    let mthis = Map.lookup thisId env
+    case mthis of
+      Just (TType (TClass (CType (Ident classId))), _, _) -> do
+        cinf <- getClassInfoIn classId
+        if Map.member fid $ classMethods cinf
+          then checkTypesExpr $ EMet (EVar (PIdent (fpos, thisId))) fapp
+          else checkTypesFApp fapp
+      _ -> checkTypesFApp fapp
   EUnOp opr exp -> do
     (texp, cexp) <- checkTypesExpr exp
     case opr of
@@ -533,6 +523,22 @@ checkTypesExpr' x = case x of
         return (functionReturnType metinf, (CEMet caller (functionIndex metinf) cexprs, functionReturnType metinf))
       _ -> fail $ typeError mpos "Dot operator applied to forbbiden type." Nothing Nothing tcaller
       --TODO  -- make "." a position token
+
+checkTypesFApp :: FApp -> CheckerType (Type, CTExpr)
+checkTypesFApp (FApp pid@(PIdent (fpos, fid)) exps) = do
+ mfi <- lookupFunEnv pid
+ case mfi of
+   Just (FunctionInfo _ treturn _ targs decPos _) -> do
+     (texps, cexs) <- unzip <$> mapM (checkTypesExpr) exps
+     when (length targs /= length texps) (fail $ "Type Error\n" ++ show fpos ++ "\nFunction " ++ fid ++
+       " declared at " ++ show decPos ++ " used with bad number of arguments." ++ "\nNumber expected: " ++
+       show (length targs) ++ "\nNumber found: " ++ show (length texps) ++ "\n")
+     mapM_ (\(ta, te, exp, i) -> do
+       unlessM (compareTypes ta te) $ fail $ typeError fpos ("Function " ++ fid ++ " declared at " ++
+         show decPos ++ " argument no. " ++ show i ++ ".") (Just exp) (Just ta) te
+       return ()) (zip4 targs texps exps [1..])
+     return (treturn, (CEApp fid cexs, treturn))
+   _ -> fail $ undecError fpos fid
 
 getClassField :: String -> PIdent -> CheckerType ClassFieldInfo
 getClassField classId (PIdent (fieldPos, fieldId)) = do
