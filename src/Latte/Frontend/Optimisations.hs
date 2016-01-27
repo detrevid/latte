@@ -37,7 +37,7 @@ boolOprsFs = Map.fromList [
   ("&&", (&&)),
   ("==", (==)),
   ("!=", (/=)),
-  ("^", (\x y -> x /= y))
+  ("^", (/=))
   ]
 
 strOprs = ["+"]
@@ -74,6 +74,12 @@ constantFolding ctexpr@(CBinOp exp1 op exp2, _) = do
             (_, True) -> let opF = (strEqOprsFs Map.! op) in return (CELit $ CLBool $ opF str1 str2, typeBool)
             _         -> fail $ internalErrMsg
         _ -> fail $ internalErrMsg
+    ((CELit (CLBool True), _), _) | op == "||" -> return exp1'
+    ((CELit (CLBool False), _), _) | op == "||" -> return exp2'
+    (_, (CELit (CLBool False), _)) | op == "||" -> return exp1'
+    ((CELit (CLBool False), _), _) | op == "&&" -> return exp1'
+    ((CELit (CLBool True), _), _) | op == "&&" -> return exp2'
+    (_, (CELit (CLBool True), _)) | op == "&&" -> return exp1'
     _ -> return ctexpr
 constantFolding x = return x
 

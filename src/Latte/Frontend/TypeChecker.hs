@@ -478,13 +478,18 @@ checkTypesExpr' x = case x of
         (texpr2, cexpr2) <- checkTypesExpr expr2
         when (texpr1 /= texpr2) $ fail $ typeError pos ("Binary operator " ++ show opr ++
               " applied to expression.") (Just expr2) (Just texpr1) texpr2
-        if texpr1 == typeString
-          then
-            if opr == eqOp
-              then return (typeBool, (CEApp (functionName equalsStringFI) [cexpr1, cexpr2], typeBool))
-              else return (typeBool, (CBinOp (CELit (CLBool True), typeBool) "^"
-                (CEApp (functionName equalsStringFI) [cexpr1, cexpr2], typeBool), typeBool))
-          else return (typeBool, (CBinOp cexpr1 opr cexpr2, typeBool))
+        cexprFolded <- CheckerType $ lift $ constantFolding $ (CBinOp cexpr1 opr cexpr2, typeBool)
+        case cexprFolded of
+          (CBinOp _ _ _, _) ->
+            if texpr1 == typeString
+              then
+                if opr == eqOp
+                  then return (typeBool, (CEApp (functionName equalsStringFI) [cexpr1, cexpr2], typeBool))
+                  else return (typeBool, (CBinOp (CELit (CLBool True), typeBool) "^"
+                    (CEApp (functionName equalsStringFI) [cexpr1, cexpr2], typeBool), typeBool))
+              else return (typeBool, (CBinOp cexpr1 opr cexpr2, typeBool))
+          (CELit _, t) -> return (t, cexprFolded)
+          _ -> fail internalErrMsg
       else checkTypesBinOp info expr1 expr2 typeInt typeBool
   EAnd expr1 (TLogAndOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeBool typeBool
   EOr expr1 (TLogOrOp info) expr2 -> checkTypesBinOp info expr1 expr2 typeBool typeBool
