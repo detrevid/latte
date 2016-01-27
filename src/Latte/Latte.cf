@@ -24,6 +24,10 @@ position token TWhile {"while"} ;
 
 position token TIf {"if"} ;
 
+position token TTrue {"true"} ;
+
+position token TFalse {"false"} ;
+
 position token TExclM '!' ;
 
 position token TMinus '-' ;
@@ -41,6 +45,10 @@ position token TLogAndOp {"&&"} ;
 position token TLogOrOp {"||"} ;
 
 position token PIdent (letter (letter|digit|'_'|'\'')*) ;
+
+position token PInteger (digit+) ;
+
+position token PString ('"' ((char - ["\"\\"]) | ('\\' ["\"\\nt"]))* '"') ;
 
 separator nonempty PIdent "," ;
 
@@ -129,13 +137,13 @@ separator FieldDecl "" ;
 
 FApp.     FApp ::= PIdent "(" [Expr] ")" ;
 
-LInt.      Literal ::= Integer ;
+LInt.      Literal ::= PInteger ;
 
-LTrue.	   Literal ::= "true" ;
+LTrue.	   Literal ::= TTrue ;
 
-LFalse.	   Literal ::= "false" ;
+LFalse.	   Literal ::= TFalse ;
 
-LString.   Literal ::= String ;
+LString.   Literal ::= PString ;
 
 --DimExpr.   DimExpr ::= "[" Expr "]";
 

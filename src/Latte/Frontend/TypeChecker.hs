@@ -312,14 +312,13 @@ checkTypesStmt x = case x of
     return (typeVoid, CSDecl decl')
   SAss lexpr rexpr -> do
     (tlexpr, clexpr) <- checkTypesExpr lexpr
-    unless (isLValuCExpr clexpr) $ fail $ typeError (0, 0) "Not a lvalue." (Just lexpr) Nothing tlexpr
+    unless (isLValuCExpr clexpr) $ fail $ typeError (getPosExpr lexpr) "Not a lvalue." (Just lexpr) Nothing tlexpr
     (trexpr, crexpr) <- checkTypesExpr rexpr
-    --TODO write get pos
-    unlessM (compareTypes tlexpr trexpr) $ fail $ typeError (0, 0) "Bad expression type after assignment sign." (Just rexpr) (Just tlexpr) trexpr
+    unlessM (compareTypes tlexpr trexpr) $ fail $ typeError (getPosExpr rexpr) "Bad expression type after assignment sign." (Just rexpr) (Just tlexpr) trexpr
     return (typeVoid, CSAss clexpr crexpr)
   SDIncr lexpr (TDIOp (pos, opr)) -> do
     (tlexpr, clexpr) <- checkTypesExpr lexpr
-    unless (isLValuCExpr clexpr) $ fail $ typeError (0, 0) "Not a lvalue." (Just lexpr) Nothing tlexpr
+    unless (isLValuCExpr clexpr) $ fail $ typeError (getPosExpr lexpr) "Not a lvalue." (Just lexpr) Nothing tlexpr
     let opr' = if opr == "++" then "+" else "-"
     when (tlexpr /= typeInt) $ fail $ typeError pos ("Operator " ++ opr ++ " applied to reference of wrong type.") Nothing (Just typeInt) tlexpr
     return (typeVoid, (CSAss clexpr ((CBinOp clexpr opr' ((CELit (CLInt 1)), typeInt)), typeInt)))
@@ -409,6 +408,28 @@ isLValuCExpr (cexpr, t) = case cexpr of
   CBinOp _ _ _ -> False
   CENull _ -> False
 
+getPosExpr :: Expr -> Position
+getPosExpr expr = case expr of
+  ELit lit -> case lit of
+    LInt (PInteger (pos, _)) -> pos
+    LTrue (TTrue (pos, _)) -> pos
+    LFalse (TFalse (pos, _)) -> pos
+    LString (PString (pos, _)) -> pos
+  EApp (FApp (PIdent (fpos, _)) _) -> fpos
+  EUnOp opr _ -> case opr of
+    ONeg (TMinus (pos, _)) -> pos
+    ONot (TExclM (pos, _)) -> pos
+  EMul expr1 _ _ -> getPosExpr expr1
+  EAdd expr1 _ _ -> getPosExpr expr1
+  ERel expr1 _ _ -> getPosExpr expr1
+  EAnd expr1 _ _ -> getPosExpr expr1
+  EOr expr1 _ _  -> getPosExpr expr1
+  ENew (NClass (PIdent (pos, _))) -> pos
+  ENull expr -> getPosExpr expr
+  EVar (PIdent (pos, _)) -> pos
+  EDot expr _ -> getPosExpr expr
+  EMet expr _ -> getPosExpr expr
+
 checkTypesExpr :: Expr -> CheckerType (Type, CTExpr)
 checkTypesExpr expr = do
   (t, cexpr) <- checkTypesExpr' expr
@@ -418,10 +439,10 @@ checkTypesExpr expr = do
 checkTypesExpr' :: Expr -> CheckerType (Type, CTExpr)
 checkTypesExpr' x = case x of
   ELit lit -> case lit of
-    LInt val    -> return (typeInt, (CELit (CLInt val), typeInt))
-    LTrue       -> return (typeBool, (CELit (CLBool True), typeBool))
-    LFalse      -> return (typeBool, (CELit (CLBool False), typeBool))
-    LString str -> return (typeString, (CELit (CLString str), typeString))
+    LInt (PInteger (_, val)) -> return (typeInt, (CELit (CLInt (read val :: Integer)), typeInt))
+    LTrue _     -> return (typeBool, (CELit (CLBool True), typeBool))
+    LFalse _    -> return (typeBool, (CELit (CLBool False), typeBool))
+    LString (PString (_, str)) -> return (typeString, (CELit (CLString $ read str), typeString))
   EApp fapp@(FApp (PIdent (fpos, fid)) _) -> do
     env <- getEnv
     let mthis = Map.lookup thisId env
@@ -492,7 +513,7 @@ checkTypesExpr' x = case x of
       getClassInfo pid
       let t' = classType varId
       return (t', (CENull t', t'))
-    _ -> fail $ "Expression is not a type." --TODO add position
+    _ -> fail $ show (getPosExpr expr) ++ "\nExpression is not a type.\n"
   EVar varPId@(PIdent (varPos, varId)) -> do
     env <- getEnv
     let mti = Map.lookup varId env
@@ -504,7 +525,6 @@ checkTypesExpr' x = case x of
        let mthis = Map.lookup thisId env
        case mthis of
          Just (_, _, _) -> checkTypesExpr $ EDot (EVar (PIdent (varPos, thisId))) varPId
-           --TODO that is not a good position
          _ -> fail $ undecError varPos varId
   EDot varExpr fieldPId@(PIdent (fieldPos, _)) -> do
     (tvar, var) <- checkTypesExpr varExpr
@@ -521,8 +541,7 @@ checkTypesExpr' x = case x of
         metinf <- maybe (fail $ undecError mpos mid) return $ Map.lookup mid $ classMethods cinf
         (_, (CEApp _ cexprs, _)) <- checkTypesExpr $ EApp $ FApp (PIdent (mpos, functionName metinf)) mexps
         return (functionReturnType metinf, (CEMet caller (functionIndex metinf) cexprs, functionReturnType metinf))
-      _ -> fail $ typeError mpos "Dot operator applied to forbbiden type." Nothing Nothing tcaller
-      --TODO  -- make "." a position token
+      _ -> fail $ typeError (getPosExpr callerExpr) "Dot operator applied to forbbiden type." Nothing Nothing tcaller
 
 checkTypesFApp :: FApp -> CheckerType (Type, CTExpr)
 checkTypesFApp (FApp pid@(PIdent (fpos, fid)) exps) = do
