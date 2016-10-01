@@ -6,7 +6,7 @@ The project implements LLVM compiler for a java-like toy language Latte.
 
 ## Language grammar
 
-Grammar of the language can be found here: [Latte.cf](src/Latte.cf). It is written using [the LBNF notation](https://bnfc.readthedocs.org/en/latest/lbnf.html).
+Grammar of the language can be found here: [Latte.cf](src/Latte/Latte.cf). It is written using [the LBNF notation](https://bnfc.readthedocs.org/en/latest/lbnf.html).
 
 Program in Latte consists of:
 * Definitions of global functions
