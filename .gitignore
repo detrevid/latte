@@ -8,8 +8,9 @@ cabal.sandbox.config
 *.iml
 .idea/
 
-### Executables created by Makefile
+### Files created by Makefile
 latc_llvm
+runtime.bc
 
 ### Files that are made by ./remake_grammar script
 src/Latte/BNFC/
