@@ -9,6 +9,7 @@ The project implements LLVM compiler for a java-like toy language Latte.
 Grammar of the language can be found here: [Latte.cf](src/Latte/Latte.cf). It is written using [the LBNF notation](https://bnfc.readthedocs.org/en/latest/lbnf.html).
 
 Program in Latte consists of:
+
 * Definitions of global functions
 * Definitions of (globally defined) classes with inheritance and virtual methods
 
@@ -88,7 +89,6 @@ Note: if you build using Makefile you can also use executable ```latc_llm``` cre
 ├── clean_grammar.sh             -- Script that removes files created with bnfc
 ├── latte.cabal                  -- Project-description-file for cabal
 ├── lib
-│   ├── runtime.bc
 │   └── runtime.ll
 ├── Makefile
 ├── README.md
