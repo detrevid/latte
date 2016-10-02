@@ -1,0 +1,12 @@
+class A {
+    int f(){
+        return -1;
+    }
+}
+
+class B extends A {
+}
+
+int main(){
+    return 0;
+}

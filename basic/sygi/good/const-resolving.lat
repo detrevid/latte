@@ -1,0 +1,6 @@
+int main(){
+    boolean a = !false;
+    if (2 * 5 != 13){
+        return 0;
+    }
+}

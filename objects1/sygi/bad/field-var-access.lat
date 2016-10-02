@@ -1,0 +1,9 @@
+class C{
+    int f(int x){
+        self.x = x + 5;
+        return x;
+    }
+}
+int main(){
+    return 0;
+}

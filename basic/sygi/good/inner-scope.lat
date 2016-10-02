@@ -1,0 +1,10 @@
+int main(){
+    int a = 23;
+    if (a > 3){
+        int a = 13;
+    } else {
+        int a = 17;
+    }
+    printInt(a);
+    return a;
+}

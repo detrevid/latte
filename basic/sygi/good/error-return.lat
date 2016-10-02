@@ -1,0 +1,8 @@
+int main(){
+    boolean a = true;
+    if (a){
+        error();
+    }
+    printString("bad"); // to make sure error finishes execution
+    return 0;
+}

@@ -1,0 +1,15 @@
+class C {
+    C other;
+
+    int f() {
+        return -1;
+    }
+}
+
+C myF(){
+    return new C;
+}
+int main(){
+    myF().f();
+    return 0;
+}

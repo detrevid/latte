@@ -1,0 +1,9 @@
+int main(){
+    printInt(foo(4));
+    return 0;
+}
+
+int foo(int x){
+	int x = 23;
+	return x;
+}

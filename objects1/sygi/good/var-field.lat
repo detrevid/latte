@@ -1,0 +1,11 @@
+class C {
+    int f;
+    int func(){
+        int f;
+        return f; // local var
+    }
+}
+int main(){
+    C c = new C;
+    return 0;
+}
