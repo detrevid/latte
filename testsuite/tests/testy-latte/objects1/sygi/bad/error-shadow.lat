@@ -1,0 +1,8 @@
+class C{
+    int error(){
+        error(); // this executes method and not a global function, so there's amissing return here
+    }
+}
+int main(){
+    return 0;
+}

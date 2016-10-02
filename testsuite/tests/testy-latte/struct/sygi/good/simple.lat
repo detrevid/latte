@@ -1,0 +1,18 @@
+class A{
+    int length;
+}
+
+int main(){
+    A a = new A;
+    B b = new B;
+    b.field = 15;
+    a.length = b.field + 5;
+    int[] t = new int[10];
+    t.length;
+    printInt(a.length);
+    return 0;
+}
+
+class B {
+    int field;
+}

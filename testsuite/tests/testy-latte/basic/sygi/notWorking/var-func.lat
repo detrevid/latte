@@ -1,0 +1,10 @@
+int main(){
+    int a = 234;
+    printInt(a(34));
+    return 3;
+}
+
+int a(int x){
+    int a = 23;
+    return a;
+}

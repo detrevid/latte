@@ -1,0 +1,8 @@
+int main(){
+    int[] a = new int[12];
+    a[10] = 5;
+    int l = new int[10].length;
+    printInt(a[l]); // 5
+    printInt(l); // 10
+    return a[l];
+}

@@ -1,0 +1,10 @@
+int main(){
+    string a = "s";
+    string b = "ygi";
+    if (a + b == "sygi"){
+        printString("ok");
+        return 0;
+    } else {
+        return 1;
+    }
+}
