@@ -6,18 +6,21 @@ The project implements LLVM compiler for a java-like toy language Latte.
 
 ## Language grammar
 
-Grammar of the language can be found here: [Latte.cf](src/Latte/Latte.cf). It is written using [the LBNF notation](https://bnfc.readthedocs.org/en/latest/lbnf.html).
+Grammar of the language can be found here: [Latte.cf](src/Latte/Latte.cf).
+It is written using [the LBNF notation](https://bnfc.readthedocs.org/en/latest/lbnf.html).
 
 Program in Latte consists of:
 
-* Definitions of global functions
-* Definitions of (globally defined) classes with inheritance and virtual methods
+- definitions of global functions
+- definitions of (globally defined) classes with inheritance and virtual methods
 
 ## Requirements
 
 ### BNFC
 
-You can find information on [the official site](http://bnfc.digitalgrammars.com/) and [the github page](https://github.com/BNFC/bnfc). The version that has been used during development is 2.8.
+You can find information on [the official site](http://bnfc.digitalgrammars.com/) and
+[the github page](https://github.com/BNFC/bnfc).
+The version that has been used during development is 2.8.
 
 ### LLVM
 
@@ -58,12 +61,14 @@ cabal install
 ## Usage
 
 ```
-cabal run <test>
+cabal run <latte_program>
 ```
 
-Where ```<test>``` is a file containing a program written in Latte language. This command will create llvm bytecode file.
+Where *<latte_program>* is a file containing a program written in Latte language.
+This command will create llvm bytecode file.
 
-Note: if you build using Makefile you can also use executable ```latc_llm``` created by make command instead of cabal.
+Note: if you have used Makefile to build the project then
+you can also use executable *latc_llm* created by *make* command instead of cabal.
 
 
 ## Testing
@@ -72,15 +77,29 @@ Note: if you build using Makefile you can also use executable ```latc_llm``` cre
 ./testsuite/runtests.sh
 ```
 
+All tests can be found under [tests](testsuite/tests/). Tests consists of:
+
+- *.lat* - program written in Latte
+- *.input* - input data for a program
+- *.output* - output that should be returned by a program
+
+Note that projected has not implemented all functionalities that are covered by tests.
+To see what tests are currently covered you can see variable *testsDirs* in [runtests.sh](testsuite/runtests.sh) script.
+
+Tests that can be found under [testsuite/tests/mrjp-tests](testsuite/tests/mrjp-tests/) and
+[testsuite/tests/testy-latte](testsuite/tests/testy-latte/)
+are modified versions of projects: [mrjp-tests](https://github.com/tomwys/mrjp-tests) and
+[testy-latte](https://github.com/sygi/testy-latte) respectively.
+
 ## Changelog
 
 ### 0.1.1.0
 
-* Add classes with inheritance and virtual methods
-* Change string equality semantics - from reference equality to equality of values
-* Remove usage of alloc in evaluation of boolean expression
-* Fix constant folding
-* Code refactoring
+- add classes with inheritance and virtual methods
+- change string equality semantics - from reference equality to equality of values
+- remove usage of alloc in evaluation of boolean expression
+- fix constant folding
+- code refactoring
 
 ## Project structure
 
@@ -89,7 +108,7 @@ Note: if you build using Makefile you can also use executable ```latc_llm``` cre
 ├── clean_grammar.sh             -- Script that removes files created with bnfc
 ├── latte.cabal                  -- Project-description-file for cabal
 ├── lib
-│   └── runtime.ll
+│   └── runtime.ll               -- File contains declarations and definitions of Latte built-in functions
 ├── Makefile
 ├── README.md
 ├── remake_grammar.sh            -- Script that runs bnfc
